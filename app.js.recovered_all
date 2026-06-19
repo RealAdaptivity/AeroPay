@@ -1,0 +1,1503 @@
+/**
+ * AeroPay Core Orchestrator & State Manager
+ */
+
+// Default Seed Data
+const DEFAULT_STATE = {
+    employees: [
+        { id: "emp-101", name: "Sarah Jenkins", email: "sarah.j@company.com", role: "Software Architect", type: "salaried", rate: 125000, payFrequency: "biweekly", filingStatus: "married", state: "CA" },
+        { id: "emp-102", name: "David Miller", email: "d.miller@company.com", role: "Marketing Lead", type: "salaried", rate: 84000, payFrequency: "biweekly", filingStatus: "single", state: "NY" },
+        { id: "emp-103", name: "Elena Rostova", email: "e.rostova@company.com", role: "Customer Support Executive", type: "hourly", rate: 28.50, payFrequency: "weekly", filingStatus: "single", state: "TX" },
+        { id: "emp-104", name: "Marcus Brody", email: "m.brody@company.com", role: "UX Designer (Contractor)", type: "hourly", rate: 45.00, payFrequency: "biweekly", filingStatus: "married", state: "FL" }
+    ],
+    timesheets: {
+        "emp-103": [8, 8, 8, 8, 8, 0, 0], // 40 hours standard
+        "emp-104": [8, 9, 8, 10, 8, 0, 0] // 43 hours (3h OT)
+    },
+    payrollHistory: [
+        {
+            id: "run-001",
+            date: "May 15, 2026",
+            employeeCount: 4,
+            grossPayroll: 10450.00,
+            employerTaxes: 852.10,
+            totalCost: 11302.10,
+            details: {}
+        },
+        {
+            id: "run-002",
+            date: "May 30, 2026",
+            employeeCount: 4,
+            grossPayroll: 10580.00,
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            const input = document.getElementById(`myTimeDay-${idx}`);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            const input = document.getElementById(`myTimeDay-${idx}`);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // Calculate EXACT payroll via the engine!
+            const calculations = calculatePayroll(emp, currentRunParams, ytdGross);
+            
+            // Store results
+            this.activeRunData[emp.id] = {
+                employee: emp,
+                params: currentRunParams,
+                results: calculations
+            };
+
+            html += `
+                <tr style="cursor:pointer;" onclick="AeroApp.previewEmployeePaystub('${emp.id}')" title="Click to view detailed pay stub">
+                    <td>
+                        <div style="font-weight:600; text-decoration: underline; color: var(--primary);">${emp.name}</div>
+                        <div style="font-size:11px; color:var(--text-tertiary);">${emp.role}</div>
+                    </td>
+                    <td style="font-weight:600;">${formatCurrency(calculations.grossPay)}</td>
+                    <td>${formatCurrency(calculations.taxes.federalIncomeTax)}</td>
+                    <td>${formatCurrency(calculations.taxes.socialSecurity + calculations.taxes.medicare)}</td>
+                    <td>${formatCurrency(calculations.taxes.stateIncomeTax)}</td>
+                    <td>${formatCurrency(calculations.preTaxDeductions)}</td>
+                    <td style="font-weight:700; color:var(--success);">${formatCurrency(calculations.netPay)}</td>
+                    <td style="text-align: right; font-weight:700;">${formatCurrency(calculations.totalPayrollCost)}</td>
+                </tr>
+            `;
+        });
+
+        body.innerHTML = html;
+    },
+
+    buildWizardStep3: function() {
+        let netSum = 0;
+        let taxSum = 0;
+        let totalDebitSum = 0;
+
+        Object.values(this.activeRunData).forEach(entry => {
+            netSum += entry.results.netPay;
+            // Employee taxes + Employer taxes = Tax liabilities to pay
+            taxSum += entry.results.taxes.totalEmployeeTaxes + entry.results.employerTaxes.totalEmployerTaxes;
+            totalDebitSum += entry.results.totalPayrollCost;
+        });
+
+        document.getElementById('wizardNetWagesSum').textContent = formatCurrency(netSum);
+        document.getElementById('wizardTaxLiabilitiesSum').textContent = formatCurrency(taxSum);
+        document.getElementById('wizardTotalDebitSum').textContent = formatCurrency(totalDebitSum);
+    },
+
+    previewEmployeePaystub: function(empId) {
+        const entry = this.activeRunData[empId];
+        if (!entry) return;
+        
+        const dateRange = "June 01 - June 14, 2026";
+        const stubHTML = getPaystubHTML(entry.employee, entry.results, dateRange);
+        
+        const fullContent = `
+            <div style="display:flex; justify-content:flex-end; margin-bottom:12px;" class="no-print">
+                <button class="btn btn-outline" onclick="window.print()">
+                    <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.72 13.82l.024-.03c1.21-1.5 3.53-1.5 4.74 0l.024.03c.354.439.814.782 1.34 1 .53.22 1.1.33 1.68.33h1.96V10.5h-1.96c-.58 0-1.15.11-1.68.33-.526.218-.986.56
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (input) {
+                total += parseFloat(input.value) || 0;
+            }
+        }
+
+        const totalHrsEl = document.getElementById('myTimeTotalHrs');
+        const breakdownEl = document.getElementById('myTimeBreakdownHrs');
+        const estGrossEl = document.getElementById('myTimeEstGross');
+
+        if (totalHrsEl) totalHrsEl.textContent = `${total.toFixed(2)} hrs`;
+
+        // Overtime rule: hours exceeding 40 hours per week are calculated at 1.5x
+        let reg = Math.min(40, total);
+        let ot = Math.max(0, total - 40);
+
+        if (breakdownEl) breakdownEl.textContent = `${reg.toFixed(2)}h Reg / ${ot.toFixed(2)}h OT`;
+
+        // Estimate gross
+        const estGross = (reg * employee.rate) + (ot * employee.rate * 1.5);
+        if (estGrossEl) estGrossEl.textContent = formatCurrency(estGross);
+    },
+
+    saveMyTimesheet: function() {
+        const employeeId = this.session.employeeId;
+        const hours = [];
+        for (let idx = 0; idx < 7; idx++) {
+            const input = document.getElementById(`myTimeDay-${idx}`);
+            if (input) {
+                hours.push(parseFloat(input.value) || 0);
+            }
+        }
+
+        this.state.timesheets[employeeId] = hours;
+        this.saveStateToStorage();
+        this.showToast("Timecard hours successfully logged and submitted.", "success");
+        this.navigateTo('employee-dashboard');
+    }
+};
+
+// Start application on load
+window.addEventListener('DOMContentLoaded', () => {
+    AeroApp.init();
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    },
+
+    toggleTheme: function() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        this.showToast(`Theme switched to ${newTheme} mode`, 'success');
+    },
+
+    filterComparisonTable: function(category) {
+        const btnAll = document.getElementById('btnFilterAll');
+        const btnSpeedPrice = document.getElementById('btnFilterSpeedPrice');
+        const btnComplianceAPI = document.getElementById('btnFilterComplianceAPI');
+
+        if (btnAll) btnAll.classList.remove('active');
+        if (btnSpeedPrice) btnSpeedPrice.classList.remove('active');
+        if (btnComplianceAPI) btnComplianceAPI.classList.remove('active');
+
+        if (category === 'all') {
+            if (btnAll) btnAll.classList.add('active');
+        } else if (category === 'speed-price') {
+            if (btnSpeedPrice) btnSpeedPrice.classList.add('active');
+        } else if (category === 'compliance-api') {
+            if (btnComplianceAPI) btnComplianceAPI.classList.add('active');
+        }
+
+        document.querySelectorAll('.comp-table tbody tr').forEach(row => {
+            const rowCat = row.getAttribute('data-category');
+            if (category === 'all' || rowCat === category) {
+                row.classList.remove('filtered-out');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            if (input) {
+                total += parseFloat(input.value) || 0;
+            }
+        }
+
+        const totalHrsEl = document.getElementById('myTimeTotalHrs');
+        const breakdownEl = document.getElementById('myTimeBreakdownHrs');
+        const estGrossEl = document.getElementById('myTimeEstGross');
+
+        if (totalHrsEl) totalHrsEl.textContent = `${total.toFixed(2)} hrs`;
+
+        // Overtime rule: hours exceeding 40 hours per week are calculated at 1.5x
+        let reg = Math.min(40, total);
+        let ot = Math.max(0, total - 40);
+
+        if (breakdownEl) breakdownEl.textContent = `${reg.toFixed(2)}h Reg / ${ot.toFixed(2)}h OT`;
+
+        // Estimate gross
+        const estGross = (reg * employee.rate) + (ot * employee.rate * 1.5);
+        if (estGrossEl) estGrossEl.textContent = formatCurrency(estGross);
+    },
+
+    saveMyTimesheet: function() {
+        const employeeId = this.session.employeeId;
+        const hours = [];
+        for (let idx = 0; idx < 7; idx++) {
+            const input = document.getElementById(`myTimeDay-${idx}`);
+            if (input) {
+                hours.push(parseFloat(input.value) || 0);
+            }
+        }
+
+        this.state.timesheets[employeeId] = hours;
+        this.saveStateToStorage();
+        this.showToast("Timecard hours successfully logged and submitted.", "success");
+        this.navigateTo('employee-dashboard');
+    }
+};
+
+// Start application on load
+window.addEventListener('DOMContentLoaded', () => {
+    AeroApp.init();
+});
