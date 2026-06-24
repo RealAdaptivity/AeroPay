@@ -42,8 +42,8 @@ const AeroConfig = (() => {
     // ── Live config ───────────────────────────────────────────────────────────
     const LIVE = {
         stripePublishableKey: "pk_live_51ThUrM63pkYFHroZwSp81uptqXfbshYAyng2LMObi4IEgSiwN9WC9vLTXNgethWELkrYf5jfuC5gNOa8bdhq3xA300HfpMxCaz",
-        priceBaseId:          "price_1TjzIk63pkYFHroZF5MNkxjQ",
-        priceSeatId:          "price_1TjzIn63pkYFHroZ5OPRo0NM",
+        priceBaseId:          "price_1TlwbdPRpbEk768fwPu4TQdW",
+        priceSeatId:          "price_1TlwbdPRpbEk768fxCal4aPP",
         supabaseUrl:          "https://ojvnxnlrghatkwjrlnop.supabase.co",
         checkoutFunctionUrl:  "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-checkout",
         portalFunctionUrl:    "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-portal",

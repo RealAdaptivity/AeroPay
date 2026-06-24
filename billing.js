@@ -9,8 +9,8 @@
  * auto-switches between sandbox and live based on hostname.
  *
  * Stripe Price IDs (live):
- *   Base $29/mo  : price_1TjzIk63pkYFHroZF5MNkxjQ
- *   Per seat $4  : price_1TjzIn63pkYFHroZ5OPRo0NM
+ *   Base $29/mo  : price_1TlwbdPRpbEk768fwPu4TQdW
+ *   Per seat $4  : price_1TlwbdPRpbEk768fxCal4aPP
  */
 
 // All values come from config.js (loaded before this file).
