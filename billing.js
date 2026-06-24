@@ -2,27 +2,23 @@
  * AeroPay — Billing Module
  * Handles Stripe Checkout, Customer Portal, and subscription state.
  *
- * Add to index.html AFTER supabase.js:
+ * Add to index.html AFTER config.js and supabase.js:
  *   <script src="billing.js"></script>
  *
- * This module creates Checkout Sessions and Portal Sessions via
- * a Supabase Edge Function (stripe-checkout) so the Stripe secret
- * key never touches the browser.
+ * Keys and price IDs are resolved from AeroConfig (config.js), which
+ * auto-switches between sandbox and live based on hostname.
  *
  * Stripe Price IDs (live):
  *   Base $29/mo  : price_1TjzIk63pkYFHroZF5MNkxjQ
  *   Per seat $4  : price_1TjzIn63pkYFHroZ5OPRo0NM
  */
 
-const STRIPE_PUBLISHABLE_KEY = "pk_live_51ThUrM63pkYFHroZwSp81uptqXfbshYAyng2LMObi4IEgSiwN9WC9vLTXNgethWELkrYf5jfuC5gNOa8bdhq3xA300HfpMxCaz";
-
-// Edge Function URLs (deployed to your Supabase project)
-const CHECKOUT_FUNCTION_URL  = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-checkout";
-const PORTAL_FUNCTION_URL    = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-portal";
-
-// Price IDs created in your live Stripe account
-const PRICE_BASE_ID = "price_1TjzIk63pkYFHroZF5MNkxjQ";
-const PRICE_SEAT_ID = "price_1TjzIn63pkYFHroZ5OPRo0NM";
+// All values come from config.js (loaded before this file).
+const STRIPE_PUBLISHABLE_KEY = AeroConfig.stripePublishableKey;
+const CHECKOUT_FUNCTION_URL  = AeroConfig.checkoutFunctionUrl;
+const PORTAL_FUNCTION_URL    = AeroConfig.portalFunctionUrl;
+const PRICE_BASE_ID          = AeroConfig.priceBaseId;
+const PRICE_SEAT_ID          = AeroConfig.priceSeatId;
 
 // ─────────────────────────────────────────────
 // PUBLIC API

@@ -19,6 +19,10 @@
  *   invoice.payment_succeeded
  *   invoice.payment_failed
  *   customer.updated
+ *   treasury.outbound_transfer.posted
+ *   treasury.outbound_transfer.failed
+ *   treasury.outbound_transfer.returned
+ *   account.updated  (Connect — capability grants, onboarding completion)
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -76,6 +80,19 @@ serve(async (req: Request) => {
 
             case "invoice.payment_failed":
                 await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+                break;
+
+            case "treasury.outbound_transfer.posted":
+                await handleOutboundTransfer(event.data.object as any, "succeeded");
+                break;
+
+            case "treasury.outbound_transfer.failed":
+            case "treasury.outbound_transfer.returned":
+                await handleOutboundTransfer(event.data.object as any, "failed");
+                break;
+
+            case "account.updated":
+                await handleAccountUpdated(event.data.object as Stripe.Account);
                 break;
 
             default:
@@ -218,6 +235,108 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     });
 
     console.log(`[webhook] Payment failed for company ${subRow.company_id}.`);
+}
+
+/**
+ * Update ach_transfers row when Stripe Treasury confirms or rejects a transfer.
+ */
+async function handleOutboundTransfer(transfer: any, status: "succeeded" | "failed") {
+    const { error } = await supabase
+        .from("ach_transfers")
+        .update({
+            status,
+            failure_message: status === "failed" ? (transfer.returned_details?.code ?? "transfer_failed") : null,
+            updated_at: new Date().toISOString(),
+        })
+        .eq("stripe_transfer_id", transfer.id);
+
+    if (error) throw error;
+
+    const companyId = transfer.metadata?.company_id;
+    if (companyId) {
+        await supabase.from("audit_log").insert({
+            company_id:  companyId,
+            actor_label: "Stripe",
+            action:      status === "succeeded" ? "ACH Transfer Sent" : "ACH Transfer Failed",
+            details:     `OutboundTransfer ${transfer.id} — $${((transfer.amount ?? 0) / 100).toFixed(2)} — ${status}`,
+            category:    "payroll",
+        });
+    }
+
+    console.log(`[webhook] OutboundTransfer ${transfer.id} → ${status}`);
+}
+
+/**
+ * When a connected account's capabilities change, update our status and
+ * auto-provision a Treasury Financial Account once treasury capability is active.
+ */
+async function handleAccountUpdated(account: Stripe.Account) {
+    const companyId = account.metadata?.company_id;
+    if (!companyId) {
+        console.warn(`[webhook] account.updated for ${account.id} has no company_id metadata`);
+        return;
+    }
+
+    const caps           = account.capabilities ?? {};
+    const treasuryActive = caps.treasury === "active";
+    const achActive      = caps.us_bank_account_ach_payments === "active";
+    const requirementsDue = account.requirements?.currently_due ?? [];
+    const onboardingDone  = requirementsDue.length === 0;
+
+    let newStatus = "pending_onboarding";
+    if (onboardingDone && treasuryActive && achActive) {
+        newStatus = "active";
+    } else if (onboardingDone) {
+        newStatus = "pending_verification";
+    }
+
+    await supabase.from("companies")
+        .update({ stripe_account_status: newStatus })
+        .eq("id", companyId);
+
+    // Auto-create financial account once treasury is fully active
+    if (newStatus === "active") {
+        const { data: company } = await supabase
+            .from("companies")
+            .select("stripe_financial_account_id")
+            .eq("id", companyId)
+            .single();
+
+        if (!company?.stripe_financial_account_id) {
+            try {
+                const fa = await stripe.treasury.financialAccounts.create(
+                    {
+                        supported_currencies: ["usd"],
+                        features: {
+                            inbound_transfers:   { ach: { requested: true } },
+                            outbound_transfers:  { ach: { requested: true } },
+                            outbound_payments:   { us_bank_account: { requested: true } },
+                            financial_addresses: { aba: { requested: true } },
+                        },
+                    },
+                    { stripeAccount: account.id },
+                );
+
+                await supabase.from("companies")
+                    .update({ stripe_financial_account_id: fa.id })
+                    .eq("id", companyId);
+
+                await supabase.from("audit_log").insert({
+                    company_id:  companyId,
+                    actor_label: "Stripe",
+                    action:      "Treasury Financial Account Created",
+                    details:     `Financial account ${fa.id} auto-provisioned after capabilities approved`,
+                    category:    "settings",
+                });
+
+                console.log(`[webhook] Financial account ${fa.id} created for company ${companyId}`);
+            } catch (err) {
+                console.error(`[webhook] Failed to create financial account for ${companyId}:`, err.message);
+            }
+        }
+    }
+
+    console.log(`[webhook] account.updated ${account.id} → status=${newStatus}`);
 }
 
 /**

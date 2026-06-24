@@ -1546,8 +1546,69 @@ function renderIntegrationsView(state) {
 }
 
 // 7. Render Settings View
+function _connectStatusBadge(status) {
+    const map = {
+        not_created:          { label: 'Not Set Up',            color: 'var(--text-tertiary)', bg: 'var(--bg-tertiary)' },
+        pending_onboarding:   { label: 'Onboarding Required',   color: 'var(--warning)',        bg: 'var(--warning-light)' },
+        pending_verification: { label: 'Under Review',          color: '#3b82f6',               bg: '#eff6ff' },
+        active:               { label: 'Active',                color: 'var(--success)',         bg: 'var(--success-light)' },
+    };
+    const s = map[status] || map.not_created;
+    return `<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:var(--radius-full);background:${s.bg};color:${s.color};">${s.label}</span>`;
+}
+
 function renderSettingsView(state) {
+    const connectStatus = state.settings?.stripeAccountStatus || 'not_created';
+    const faId          = state.settings?.stripeFinancialAccountId || '';
+    const accountId     = state.settings?.stripeAccountId || '';
+
     return `
+        <!-- Treasury / ACH Onboarding Card -->
+        <div class="card" style="padding:32px; max-width:800px; margin-bottom:24px;">
+            <div class="section-title" style="margin-bottom:4px;">
+                <span>ACH Direct Deposit — Stripe Connect</span>
+                ${_connectStatusBadge(connectStatus)}
+            </div>
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:20px;">
+                AeroPay uses Stripe Treasury to send ACH direct deposits to your employees. Complete Stripe's one-time onboarding to activate.
+            </p>
+
+            ${connectStatus === 'not_created' ? `
+            <div style="display:flex; gap:12px; align-items:flex-start; background:var(--bg-secondary); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:16px;">
+                <div style="font-size:20px;">🏦</div>
+                <div>
+                    <p style="font-weight:600; margin:0 0 4px;">Activate ACH Payroll Disbursements</p>
+                    <p style="font-size:13px; color:var(--text-secondary); margin:0;">Stripe will verify your business identity (KYB) — typically takes 1–2 business days. Your employees can link bank accounts once onboarding is complete.</p>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="AeroApp.startConnectOnboarding()">Start Stripe Onboarding</button>
+            ` : connectStatus === 'pending_onboarding' ? `
+            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">Onboarding has been started but is not yet complete. Click below to continue where you left off.</p>
+            <button class="btn btn-primary" onclick="AeroApp.startConnectOnboarding()">Continue Onboarding</button>
+            ` : connectStatus === 'pending_verification' ? `
+            <p style="font-size:13px; color:var(--text-secondary);">Onboarding submitted — Stripe is reviewing your business information. This typically takes 1–2 business days. You'll be notified once capabilities are approved.</p>
+            ` : `
+            <div style="display:flex; flex-direction:column; gap:8px; font-size:13px; color:var(--text-secondary);">
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Connected Account</span>
+                    <span style="font-weight:600; color:var(--text-primary); font-family:monospace;">${accountId}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Treasury Financial Account</span>
+                    <span style="font-weight:600; color:var(--text-primary); font-family:monospace;">${faId || '—'}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span>ACH Cutoff (standard)</span>
+                    <span style="font-weight:600; color:var(--text-primary);">8:30 PM ET</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span>ACH Cutoff (same-day)</span>
+                    <span style="font-weight:600; color:var(--text-primary);">1:00 PM ET</span>
+                </div>
+            </div>
+            `}
+        </div>
+
         <div class="card" style="padding: 32px; max-width:800px;">
             <div class="section-title">Company Profile & Banking</div>
             <p style="font-size:13px; color:var(--text-secondary); margin-bottom:24px;">Configure your federal employer ID (EIN), state UI account details, funding bank numbers, and payroll configurations.</p>
@@ -2593,6 +2654,28 @@ function renderEmployeeDashboardView(state, employeeId) {
 
             <!-- Right Column: Direct Deposit Allocation & On-Demand Pay Advance -->
             <div style="display:flex; flex-direction:column; gap:24px;">
+                <!-- Card 0: ACH Bank Account Linking -->
+                <div class="card" style="padding:24px;">
+                    <div class="section-title" style="margin-bottom:12px; display:flex; flex-direction:column; align-items:flex-start; gap:4px;">
+                        <span style="font-size:16px;">Direct Deposit — Bank Account</span>
+                        <p style="font-size:12px; color:var(--text-secondary); margin:0;">Link a checking account to receive net pay via ACH on payday.</p>
+                    </div>
+                    ${employee.bankLast4 ? `
+                    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-secondary); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:12px;">
+                        <div>
+                            <p style="margin:0; font-weight:600; font-size:14px;">Bank account ending in ••••${employee.bankLast4}</p>
+                            <p style="margin:0; font-size:12px; color:var(--text-secondary);">Routing: ${employee.bankRouting || '—'}</p>
+                        </div>
+                        <span style="font-size:11px; font-weight:700; padding:3px 10px; border-radius:var(--radius-full); background:var(--success-light); color:var(--success);">Linked</span>
+                    </div>
+                    <button class="btn btn-secondary" style="width:100%; justify-content:center;" onclick="AeroApp.linkAchBankAccount('${employee.id}')">Replace Bank Account</button>
+                    ` : `
+                    <button class="btn btn-primary" style="width:100%; justify-content:center; padding:10px 0;" onclick="AeroApp.linkAchBankAccount('${employee.id}')">
+                        Link Bank Account for ACH Deposit
+                    </button>
+                    `}
+                </div>
+
                 <!-- Card 1: Direct Deposit Allocation -->
                 <div class="card" style="padding:24px;">
                     <div class="section-title" style="margin-bottom:12px; display:flex; flex-direction:column; align-items:flex-start; gap:4px;">
