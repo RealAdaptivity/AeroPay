@@ -27,7 +27,7 @@ const AeroConfig = (() => {
     // Replace these values with your Stripe test-mode keys and price IDs.
     // Test price IDs must be created in your Stripe Dashboard (test mode).
     const SANDBOX = {
-        stripePublishableKey: "pk_test_REPLACE_WITH_YOUR_TEST_KEY",
+        stripePublishableKey: "pk_test_51TkoXCAsgAzfeB6D4ktKPKED969ZbEemhjEfXoEybDqh45GFfm5Oflziwkc4QLwfc1IaTNvCojYBqNpRrIMz2Mck00uHoKZHlZ",
         priceBaseId:          "price_REPLACE_WITH_TEST_BASE_PRICE",
         priceSeatId:          "price_REPLACE_WITH_TEST_SEAT_PRICE",
         supabaseUrl:          "https://ojvnxnlrghatkwjrlnop.supabase.co",
