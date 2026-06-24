@@ -290,7 +290,13 @@ function calculatePayroll(employee, currentRun, ytdGross = 0) {
     postTaxDeductions += garnishmentDeduction + payAdvanceDeduction;
     
     // 7. Calculate Net Pay
-    const totalTaxes = fitWithholding + totalFICAWithholding + sitWithholding;
+    // Round each tax component to cents first, then sum — this ensures the
+    // paystub reconciles: reported line items add up to the reported total.
+    const roundedFit  = round(fitWithholding);
+    const roundedSS   = round(ssWithholding);
+    const roundedMed  = round(totalMedicareWithholding);
+    const roundedSit  = round(sitWithholding);
+    const totalTaxes  = roundedFit + roundedSS + roundedMed + roundedSit;
     const netPay = Math.max(0, grossPay - preTaxDeductions - totalTaxes - postTaxDeductions + reimbursement);
     
     // Direct deposit split calculations (if enabled)
@@ -353,11 +359,11 @@ function calculatePayroll(employee, currentRun, ytdGross = 0) {
         hasSplit: hasSplit,
         
         taxes: {
-            federalIncomeTax: round(fitWithholding),
-            socialSecurity: round(ssWithholding),
-            medicare: round(totalMedicareWithholding),
-            stateIncomeTax: round(sitWithholding),
-            totalEmployeeTaxes: round(totalTaxes)
+            federalIncomeTax: roundedFit,
+            socialSecurity:   roundedSS,
+            medicare:         roundedMed,
+            stateIncomeTax:     roundedSit,
+            totalEmployeeTaxes: totalTaxes
         },
         
         netPay: round(netPay),
