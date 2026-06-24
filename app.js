@@ -2,7 +2,8 @@
  * AeroPay Core Orchestrator & State Manager
  */
 
-const ACH_FUNCTION_URL = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach";
+const ACH_FUNCTION_URL     = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach";
+const CONNECT_FUNCTION_URL = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-connect";
 
 /**
  * Call the stripe-ach edge function to initiate OutboundTransfers for every
@@ -303,6 +304,7 @@ const AeroApp = {
             if (typeof AeroBilling !== 'undefined') {
                 AeroBilling.renderBillingBanner();
                 AeroBilling.handleCheckoutReturn();
+                this._handleConnectReturn();
             }
         } catch (err) {
             console.error('[AeroApp] Failed to load state:', err);
@@ -320,6 +322,20 @@ const AeroApp = {
     },
 
     saveStateToStorage: function() {}, // no-op — all persistence via AeroDB
+
+    _handleConnectReturn: function() {
+        const params = new URLSearchParams(window.location.search);
+        const connect = params.get('connect');
+        if (!connect) return;
+        window.history.replaceState({}, '', window.location.pathname);
+        if (connect === 'return') {
+            this.showToast('Stripe onboarding submitted! Capability verification may take a few minutes.', 'success');
+            setTimeout(() => this._refreshState(), 4000);
+        } else if (connect === 'refresh') {
+            this.showToast('Onboarding link expired — restarting.', 'info');
+            this.startConnectOnboarding();
+        }
+    },
 
     // ─── Setup Wizard ────────────────────────────────────────────
     setupGoTo: function(step) {
@@ -1599,6 +1615,41 @@ const AeroApp = {
             await AeroDB.addAuditLog('Settings Updated', 'Company settings saved', 'settings');
             this.showToast('Company accounting settings updated successfully.', 'success');
         } catch (err) { this.showToast('Failed to save settings: ' + err.message, 'danger'); }
+    },
+
+    /**
+     * Create (or resume) Stripe Connect onboarding for this company.
+     * Redirects to Stripe-hosted KYB onboarding; on return, the account.updated
+     * webhook auto-provisions the Treasury Financial Account.
+     */
+    startConnectOnboarding: async function() {
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) { this.showToast('Please sign in first.', 'warning'); return; }
+
+        const company = this.state.settings;
+        this.showToast('Opening Stripe onboarding…', 'info');
+
+        try {
+            const resp = await fetch(CONNECT_FUNCTION_URL, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body:    JSON.stringify({
+                    action:      'create_account',
+                    companyName: company?.companyName || '',
+                    ein:         company?.ein || '',
+                }),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                this.showToast(err.error || 'Failed to start onboarding.', 'danger');
+                return;
+            }
+            const { url } = await resp.json();
+            window.location.href = url;
+        } catch (err) {
+            this.showToast('Onboarding failed: ' + err.message, 'danger');
+        }
     },
 
     // --- Unified Portal Authentication Handlers ---

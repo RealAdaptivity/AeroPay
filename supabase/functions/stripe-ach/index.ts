@@ -59,23 +59,28 @@ serve(async (req: Request) => {
 async function handleSetupIntent(userId: string, body: { employeeId: string }) {
     const company = await getCompany(userId);
 
-    // Resolve or create a Stripe customer to anchor the payment method
-    const stripeCustomerId = await ensureStripeCustomer(company);
+    if (!company.stripe_account_id) {
+        return json({ error: "Stripe connected account not set up. Complete onboarding first." }, 400);
+    }
 
-    const intent = await stripe.setupIntents.create({
-        customer:             stripeCustomerId,
-        payment_method_types: ["us_bank_account"],
-        payment_method_options: {
-            us_bank_account: {
-                financial_connections: { permissions: ["payment_method"] },
-                verification_method: "instant",
+    // SetupIntent is created on the connected account so the payment method
+    // lives in the employer's Stripe account — not on the platform.
+    const intent = await stripe.setupIntents.create(
+        {
+            payment_method_types: ["us_bank_account"],
+            payment_method_options: {
+                us_bank_account: {
+                    financial_connections: { permissions: ["payment_method"] },
+                    verification_method: "instant",
+                },
+            },
+            metadata: {
+                company_id:  company.id,
+                employee_id: body.employeeId,
             },
         },
-        metadata: {
-            company_id:  company.id,
-            employee_id: body.employeeId,
-        },
-    });
+        { stripeAccount: company.stripe_account_id as string },
+    );
 
     return json({ client_secret: intent.client_secret });
 }
@@ -87,9 +92,18 @@ async function handleConfirmSetup(userId: string, body: {
     employeeId:      string;
     paymentMethodId: string;
 }) {
-    await getCompany(userId); // auth check
+    const company = await getCompany(userId);
 
-    const pm = await stripe.paymentMethods.retrieve(body.paymentMethodId);
+    if (!company.stripe_account_id) {
+        return json({ error: "Stripe connected account not set up." }, 400);
+    }
+
+    // Retrieve the payment method from the connected account's context
+    const pm = await stripe.paymentMethods.retrieve(
+        body.paymentMethodId,
+        {},
+        { stripeAccount: company.stripe_account_id as string },
+    );
     const last4   = (pm as any).us_bank_account?.last4 ?? "";
     const routing = (pm as any).us_bank_account?.routing_number ?? "";
 
@@ -130,20 +144,26 @@ async function handleDisburse(userId: string, body: {
         let stripeTransferId: string | undefined;
         let status = "processing";
 
-        if (emp?.stripe_pm_id && financialAccountId) {
+        const connectedAccountId = company.stripe_account_id as string | undefined;
+
+        if (emp?.stripe_pm_id && financialAccountId && connectedAccountId) {
             try {
-                const transfer = await stripe.treasury.outboundTransfers.create({
-                    financial_account: financialAccountId,
-                    amount:            d.netPayCents,
-                    currency:          "usd",
-                    destination_payment_method: emp.stripe_pm_id,
-                    description:       `AeroPay payroll — run ${body.payrollRunId}`,
-                    metadata: {
-                        company_id:     company.id,
-                        employee_id:    d.employeeId,
-                        payroll_run_id: body.payrollRunId,
+                // OutboundTransfer runs in the connected account's context
+                const transfer = await stripe.treasury.outboundTransfers.create(
+                    {
+                        financial_account: financialAccountId,
+                        amount:            d.netPayCents,
+                        currency:          "usd",
+                        destination_payment_method: emp.stripe_pm_id,
+                        description:       `AeroPay payroll — run ${body.payrollRunId}`,
+                        metadata: {
+                            company_id:     company.id,
+                            employee_id:    d.employeeId,
+                            payroll_run_id: body.payrollRunId,
+                        },
                     },
-                });
+                    { stripeAccount: connectedAccountId },
+                );
                 stripeTransferId = transfer.id;
                 status = "processing";
             } catch (treasuryErr) {
@@ -181,22 +201,6 @@ async function getCompany(userId: string) {
 
     if (error || !data) throw new Error("Company not found for user");
     return { id: data.company_id, ...(data.companies as Record<string, unknown>) };
-}
-
-async function ensureStripeCustomer(company: Record<string, unknown>): Promise<string> {
-    const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("stripe_customer_id")
-        .eq("company_id", company.id)
-        .maybeSingle();
-
-    if (sub?.stripe_customer_id) return sub.stripe_customer_id as string;
-
-    const customer = await stripe.customers.create({
-        name:     company.name as string,
-        metadata: { company_id: company.id as string },
-    });
-    return customer.id;
 }
 
 function json(data: object, status = 200) {

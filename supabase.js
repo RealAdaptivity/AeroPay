@@ -199,13 +199,16 @@ const AeroDB = {
             'getCompany'
         );
         return {
-            id:             data.id,
-            name:           data.name,
-            ein:            data.ein,
-            bankName:       data.bank_name,
-            routingNumber:  data.routing_number,
-            accountNumber:  data.account_number,
-            paymentType:    data.payment_type,
+            id:                       data.id,
+            name:                     data.name,
+            ein:                      data.ein,
+            bankName:                 data.bank_name,
+            routingNumber:            data.routing_number,
+            accountNumber:            data.account_number,
+            paymentType:              data.payment_type,
+            stripeAccountId:          data.stripe_account_id          || '',
+            stripeAccountStatus:      data.stripe_account_status       || 'not_created',
+            stripeFinancialAccountId: data.stripe_financial_account_id || '',
         };
     },
 
