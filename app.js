@@ -2,8 +2,9 @@
  * AeroPay Core Orchestrator & State Manager
  */
 
-const ACH_FUNCTION_URL     = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach";
-const CONNECT_FUNCTION_URL = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-connect";
+// Resolved from config.js — switches between sandbox and live automatically.
+const ACH_FUNCTION_URL     = AeroConfig.achFunctionUrl;
+const CONNECT_FUNCTION_URL = AeroConfig.connectFunctionUrl;
 
 /**
  * Call the stripe-ach edge function to initiate OutboundTransfers for every
