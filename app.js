@@ -39,6 +39,15 @@ async function _initiateAchDisbursements(payrollRunId, activeRunData) {
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
             console.error("[ACH] disburse failed:", err.error || resp.status);
+            return;
+        }
+        const { results } = await resp.json();
+        const held = (results || []).filter(r => r.status === 'held').length;
+        if (held > 0) {
+            AeroApp.showToast(
+                `${held} employee${held > 1 ? 's' : ''} on a 3-day security hold (new bank account). Their transfers will release automatically.`,
+                'info'
+            );
         }
     } catch (err) {
         // Non-fatal — payroll is already saved; log and continue

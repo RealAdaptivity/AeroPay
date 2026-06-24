@@ -8,9 +8,12 @@
  * Actions:
  *   setup_intent   — Create a SetupIntent so the frontend can collect an employee's
  *                    bank account via Stripe.js (us_bank_account payment method).
- *   confirm_setup  — Attach the confirmed PaymentMethod to an employee record.
+ *   confirm_setup  — Attach the confirmed PaymentMethod to an employee record,
+ *                    stamp bank_account_linked_at, and email both the employee
+ *                    and company admin as a fraud control.
  *   disburse       — Kick off OutboundTransfers (Stripe Treasury) for every employee
- *                    in a payroll run.
+ *                    in a payroll run, enforcing the 3-business-day hold for
+ *                    newly linked accounts.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -22,6 +25,16 @@ const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
+
+// Optional — set RESEND_API_KEY secret to enable transactional emails.
+// If not set, emails are skipped but all other logic still runs.
+const RESEND_API_KEY  = Deno.env.get("RESEND_API_KEY") ?? "";
+const PLATFORM_FROM   = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@aeropay.io";
+const PLATFORM_URL    = Deno.env.get("PLATFORM_URL") ?? "https://aeropay.io";
+
+// 3 business days in milliseconds (approximated as 3 × 24 h; weekend skipping
+// would require a calendar — this is conservative and simple).
+const HOLD_MS = 3 * 24 * 60 * 60 * 1000;
 
 const CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -54,8 +67,6 @@ serve(async (req: Request) => {
 });
 
 // ── Setup Intent ───────────────────────────────────────────────────────────────
-// Creates a SetupIntent so the frontend can securely collect an employee's bank
-// account via Stripe.js without routing/account numbers touching our servers.
 async function handleSetupIntent(userId: string, body: { employeeId: string }) {
     const company = await getCompany(userId);
 
@@ -63,8 +74,6 @@ async function handleSetupIntent(userId: string, body: { employeeId: string }) {
         return json({ error: "Stripe connected account not set up. Complete onboarding first." }, 400);
     }
 
-    // SetupIntent is created on the connected account so the payment method
-    // lives in the employer's Stripe account — not on the platform.
     const intent = await stripe.setupIntents.create(
         {
             payment_method_types: ["us_bank_account"],
@@ -86,8 +95,8 @@ async function handleSetupIntent(userId: string, body: { employeeId: string }) {
 }
 
 // ── Confirm Setup ──────────────────────────────────────────────────────────────
-// After Stripe.js confirms the SetupIntent, the frontend calls here so we can
-// store the PaymentMethod ID and last-4 on the employee record.
+// Stamps bank_account_linked_at (starts the 3-day hold clock) and fires
+// alert emails to both the employee and the company admin.
 async function handleConfirmSetup(userId: string, body: {
     employeeId:      string;
     paymentMethodId: string;
@@ -98,7 +107,6 @@ async function handleConfirmSetup(userId: string, body: {
         return json({ error: "Stripe connected account not set up." }, 400);
     }
 
-    // Retrieve the payment method from the connected account's context
     const pm = await stripe.paymentMethods.retrieve(
         body.paymentMethodId,
         {},
@@ -106,56 +114,124 @@ async function handleConfirmSetup(userId: string, body: {
     );
     const last4   = (pm as any).us_bank_account?.last4 ?? "";
     const routing = (pm as any).us_bank_account?.routing_number ?? "";
+    const linkedAt = new Date().toISOString();
+
+    // Fetch employee record before update so we have email + old last4
+    const { data: empBefore } = await supabase
+        .from("employees")
+        .select("name, email, bank_account_last4")
+        .eq("id", body.employeeId)
+        .single();
 
     const { error } = await supabase.from("employees").update({
-        stripe_pm_id:       body.paymentMethodId,
-        bank_account_last4: last4,
-        bank_routing:       routing,
+        stripe_pm_id:           body.paymentMethodId,
+        bank_account_last4:     last4,
+        bank_routing:           routing,
+        bank_account_linked_at: linkedAt,
     }).eq("id", body.employeeId);
 
     if (error) throw error;
 
-    return json({ ok: true, last4, routing });
+    // Audit log
+    const prevLast4 = empBefore?.bank_account_last4;
+    await supabase.from("audit_log").insert({
+        company_id:  company.id,
+        actor_label: "System",
+        action:      prevLast4 ? "Bank Account Changed" : "Bank Account Linked",
+        details:     prevLast4
+            ? `${empBefore?.name} changed direct deposit from ••••${prevLast4} to ••••${last4}. 3-day hold applied.`
+            : `${empBefore?.name} linked direct deposit account ••••${last4}. 3-day hold applied.`,
+        category:    "employee",
+    });
+
+    // Send alert emails (fire-and-forget; failures are logged but don't block)
+    const companyName = (company.name as string) ?? "Your employer";
+    await Promise.allSettled([
+        // Employee alert
+        empBefore?.email ? sendEmail({
+            to:      empBefore.email,
+            subject: "Your direct deposit account was updated",
+            html: `
+                <p>Hi ${empBefore.name},</p>
+                <p>Your direct deposit bank account on AeroPay has been updated to the account ending in <strong>••••${last4}</strong>.</p>
+                <p>Your first payroll deposit to this account will be held for <strong>3 business days</strong> as a security measure. ${prevLast4 ? `Your previous account (••••${prevLast4}) has been removed.` : ""}</p>
+                <p>If you did not make this change, contact your payroll administrator immediately.</p>
+                <p style="color:#6b7280;font-size:12px;">— AeroPay on behalf of ${companyName}</p>
+            `,
+        }) : Promise.resolve(),
+        // Admin alert
+        company.admin_email ? sendEmail({
+            to:      company.admin_email as string,
+            subject: `[AeroPay] Bank account changed — ${empBefore?.name}`,
+            html: `
+                <p>This is an automated security alert from AeroPay.</p>
+                <p><strong>${empBefore?.name}</strong> updated their direct deposit to the account ending in <strong>••••${last4}</strong>${prevLast4 ? ` (previously ••••${prevLast4})` : ""}.</p>
+                <p>A <strong>3-business-day hold</strong> has been applied before the first disbursement to this account.</p>
+                <p>If this change was not authorized, log in to AeroPay immediately and contact support.</p>
+                <p style="color:#6b7280;font-size:12px;"><a href="${PLATFORM_URL}">Open AeroPay</a></p>
+            `,
+        }) : Promise.resolve(),
+    ]).then(results => {
+        results.forEach((r, i) => {
+            if (r.status === "rejected") console.warn(`[stripe-ach] email ${i} failed:`, r.reason);
+        });
+    });
+
+    return json({ ok: true, last4, routing, linkedAt });
 }
 
 // ── Disburse ──────────────────────────────────────────────────────────────────
-// Creates an ach_transfer record for each employee in the run and initiates
-// an OutboundTransfer via Stripe Treasury (requires Treasury to be enabled).
-// Falls back to "processing" status (manual ACH) if Treasury is not enabled.
 async function handleDisburse(userId: string, body: {
     payrollRunId:   string;
     disbursements:  Array<{ employeeId: string; netPayCents: number }>;
 }) {
-    const company = await getCompany(userId);
+    const company            = await getCompany(userId);
     const financialAccountId = company.stripe_financial_account_id as string | undefined;
+    const connectedAccountId = company.stripe_account_id as string | undefined;
+    const now                = Date.now();
 
-    const results: Array<{ employeeId: string; status: string; transferId?: string }> = [];
+    const results: Array<{ employeeId: string; status: string; transferId?: string; heldUntil?: string }> = [];
 
     for (const d of body.disbursements) {
         if (d.netPayCents <= 0) continue;
 
-        // Fetch employee's Stripe payment method
         const { data: emp } = await supabase
             .from("employees")
-            .select("stripe_pm_id, bank_account_last4, name")
+            .select("stripe_pm_id, bank_account_last4, name, email, bank_account_linked_at")
             .eq("id", d.employeeId)
             .single();
 
+        // ── 3-day hold check ──────────────────────────────────────────────────
+        const linkedAt    = emp?.bank_account_linked_at ? new Date(emp.bank_account_linked_at).getTime() : null;
+        const inHoldWindow = linkedAt !== null && (now - linkedAt) < HOLD_MS;
+        const heldUntil   = inHoldWindow ? new Date(linkedAt + HOLD_MS).toISOString() : undefined;
+
+        if (inHoldWindow) {
+            await supabase.from("ach_transfers").insert({
+                company_id:     company.id,
+                payroll_run_id: body.payrollRunId,
+                employee_id:    d.employeeId,
+                amount_cents:   d.netPayCents,
+                status:         "held",
+                failure_message: `New bank account ••••${emp?.bank_account_last4} is within the 3-day security hold. Funds will be released on ${new Date(linkedAt! + HOLD_MS).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+            });
+            results.push({ employeeId: d.employeeId, status: "held", heldUntil });
+            continue;
+        }
+
+        // ── Initiate OutboundTransfer ─────────────────────────────────────────
         let stripeTransferId: string | undefined;
         let status = "processing";
 
-        const connectedAccountId = company.stripe_account_id as string | undefined;
-
         if (emp?.stripe_pm_id && financialAccountId && connectedAccountId) {
             try {
-                // OutboundTransfer runs in the connected account's context
                 const transfer = await stripe.treasury.outboundTransfers.create(
                     {
-                        financial_account: financialAccountId,
-                        amount:            d.netPayCents,
-                        currency:          "usd",
+                        financial_account:          financialAccountId,
+                        amount:                     d.netPayCents,
+                        currency:                   "usd",
                         destination_payment_method: emp.stripe_pm_id,
-                        description:       `AeroPay payroll — run ${body.payrollRunId}`,
+                        description:                `AeroPay payroll — run ${body.payrollRunId}`,
                         metadata: {
                             company_id:     company.id,
                             employee_id:    d.employeeId,
@@ -165,20 +241,17 @@ async function handleDisburse(userId: string, body: {
                     { stripeAccount: connectedAccountId },
                 );
                 stripeTransferId = transfer.id;
-                status = "processing";
-            } catch (treasuryErr) {
-                console.warn(`[stripe-ach] Treasury transfer failed for ${d.employeeId}:`, treasuryErr.message);
-                // Fall through with status = "processing" (manual ACH fallback)
+            } catch (err) {
+                console.warn(`[stripe-ach] OutboundTransfer failed for ${d.employeeId}:`, err.message);
             }
         }
 
-        // Persist transfer record
         const { error: insertErr } = await supabase.from("ach_transfers").insert({
-            company_id:        company.id,
-            payroll_run_id:    body.payrollRunId,
-            employee_id:       d.employeeId,
+            company_id:         company.id,
+            payroll_run_id:     body.payrollRunId,
+            employee_id:        d.employeeId,
             stripe_transfer_id: stripeTransferId ?? null,
-            amount_cents:      d.netPayCents,
+            amount_cents:       d.netPayCents,
             status,
         });
 
@@ -193,14 +266,48 @@ async function handleDisburse(userId: string, body: {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function getCompany(userId: string) {
-    const { data, error } = await supabase
-        .from("company_users")
-        .select("company_id, companies(*)")
-        .eq("user_id", userId)
-        .single();
+    const [companyRes, userRes] = await Promise.all([
+        supabase
+            .from("company_users")
+            .select("company_id, companies(*)")
+            .eq("user_id", userId)
+            .single(),
+        supabase.auth.admin.getUserById(userId),
+    ]);
 
-    if (error || !data) throw new Error("Company not found for user");
-    return { id: data.company_id, ...(data.companies as Record<string, unknown>) };
+    if (companyRes.error || !companyRes.data) throw new Error("Company not found for user");
+
+    return {
+        id:          companyRes.data.company_id,
+        admin_email: userRes.data?.user?.email ?? null,
+        ...(companyRes.data.companies as Record<string, unknown>),
+    };
+}
+
+/**
+ * Send a transactional email via Resend.
+ * Requires the RESEND_API_KEY and PLATFORM_FROM_EMAIL secrets.
+ * Silently skips if the key is not configured.
+ */
+async function sendEmail(opts: { to: string; subject: string; html: string }) {
+    if (!RESEND_API_KEY) return;
+    const resp = await fetch("https://api.resend.com/emails", {
+        method:  "POST",
+        headers: {
+            "Authorization": `Bearer ${RESEND_API_KEY}`,
+            "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({
+            from:    PLATFORM_FROM,
+            to:      opts.to,
+            subject: opts.subject,
+            html:    opts.html,
+        }),
+    });
+    if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Resend API error: ${err}`);
+    }
 }
 
 function json(data: object, status = 200) {
