@@ -19,6 +19,9 @@
  *   invoice.payment_succeeded
  *   invoice.payment_failed
  *   customer.updated
+ *   treasury.outbound_transfer.posted
+ *   treasury.outbound_transfer.failed
+ *   treasury.outbound_transfer.returned
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -76,6 +79,15 @@ serve(async (req: Request) => {
 
             case "invoice.payment_failed":
                 await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+                break;
+
+            case "treasury.outbound_transfer.posted":
+                await handleOutboundTransfer(event.data.object as any, "succeeded");
+                break;
+
+            case "treasury.outbound_transfer.failed":
+            case "treasury.outbound_transfer.returned":
+                await handleOutboundTransfer(event.data.object as any, "failed");
                 break;
 
             default:
@@ -218,6 +230,35 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     });
 
     console.log(`[webhook] Payment failed for company ${subRow.company_id}.`);
+}
+
+/**
+ * Update ach_transfers row when Stripe Treasury confirms or rejects a transfer.
+ */
+async function handleOutboundTransfer(transfer: any, status: "succeeded" | "failed") {
+    const { error } = await supabase
+        .from("ach_transfers")
+        .update({
+            status,
+            failure_message: status === "failed" ? (transfer.returned_details?.code ?? "transfer_failed") : null,
+            updated_at: new Date().toISOString(),
+        })
+        .eq("stripe_transfer_id", transfer.id);
+
+    if (error) throw error;
+
+    const companyId = transfer.metadata?.company_id;
+    if (companyId) {
+        await supabase.from("audit_log").insert({
+            company_id:  companyId,
+            actor_label: "Stripe",
+            action:      status === "succeeded" ? "ACH Transfer Sent" : "ACH Transfer Failed",
+            details:     `OutboundTransfer ${transfer.id} — $${((transfer.amount ?? 0) / 100).toFixed(2)} — ${status}`,
+            category:    "payroll",
+        });
+    }
+
+    console.log(`[webhook] OutboundTransfer ${transfer.id} → ${status}`);
 }
 
 /**

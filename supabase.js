@@ -57,6 +57,9 @@ function _toAppEmployee(row) {
             savingsRouting: row.split_savings_routing   || '',
             savingsAccount: row.split_savings_account   || '',
         },
+        bankRouting:    row.bank_routing       || '',
+        bankLast4:      row.bank_account_last4  || '',
+        stripePmId:     row.stripe_pm_id        || '',
         garnishments:   [],   // loaded separately via getGarnishments()
         isActive:       row.is_active,
         userId:         row.user_id,
@@ -310,6 +313,33 @@ const AeroDB = {
             'deleteEmployee'
         );
         await this.addAuditLog('Employee Offboarded', `Deactivated ${emp?.name || id}`, 'employee');
+    },
+
+    // ─────────────────────────────────────────
+    // ACH / BANK ACCOUNTS
+    // ─────────────────────────────────────────
+
+    /** Persist a confirmed Stripe bank PaymentMethod on an employee. */
+    async saveAchBankAccount(employeeId, { paymentMethodId, last4, routing }) {
+        _check(
+            await _sb.from('employees').update({
+                stripe_pm_id:       paymentMethodId,
+                bank_account_last4: last4,
+                bank_routing:       routing,
+            }).eq('id', employeeId),
+            'saveAchBankAccount'
+        );
+    },
+
+    /** Return ACH transfer rows for a payroll run. */
+    async getAchTransfers(payrollRunId) {
+        const { data, error } = await _sb
+            .from('ach_transfers')
+            .select('*')
+            .eq('payroll_run_id', payrollRunId)
+            .order('created_at');
+        if (error) console.error('[AeroDB] getAchTransfers:', error.message);
+        return data || [];
     },
 
     // ─────────────────────────────────────────

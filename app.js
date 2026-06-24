@@ -2,6 +2,49 @@
  * AeroPay Core Orchestrator & State Manager
  */
 
+const ACH_FUNCTION_URL = "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach";
+
+/**
+ * Call the stripe-ach edge function to initiate OutboundTransfers for every
+ * employee in the run that has a linked bank account (stripe_pm_id set).
+ * Employees without a linked account are skipped — they will need to be paid
+ * via check or another method.
+ */
+async function _initiateAchDisbursements(payrollRunId, activeRunData) {
+    try {
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) return;
+
+        // Only include employees whose net pay > 0; amounts must be whole cents
+        const disbursements = Object.entries(activeRunData)
+            .filter(([, d]) => d.results.netPay > 0)
+            .map(([empId, d]) => ({
+                employeeId:  empId,
+                netPayCents: Math.round(d.results.netPay * 100),
+            }));
+
+        if (!disbursements.length) return;
+
+        const resp = await fetch(ACH_FUNCTION_URL, {
+            method:  "POST",
+            headers: {
+                "Content-Type":  "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action: "disburse", payrollRunId, disbursements }),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            console.error("[ACH] disburse failed:", err.error || resp.status);
+        }
+    } catch (err) {
+        // Non-fatal — payroll is already saved; log and continue
+        console.error("[ACH] _initiateAchDisbursements:", err.message);
+    }
+}
+
 // Default Seed Data
 const DEFAULT_STATE = {
     employees: [
@@ -1321,8 +1364,12 @@ const AeroApp = {
             const integ = this.state.integrations || {};
             if (integ.quickbooks) await AeroDB.addSyncLog('quickbooks', `Synced period ${periodEnd} — Gross: ${formatCurrency(grossPayrollSum)}`, totalCostSum, newRunId);
             if (integ.xero)       await AeroDB.addSyncLog('xero', `Exported salaries ledger for period ${periodEnd}`, totalCostSum, newRunId);
+
+            // Initiate ACH disbursements for employees with a linked bank account
+            await _initiateAchDisbursements(newRunId, this.activeRunData);
+
             await this._refreshState();
-            this.showToast('Payroll successfully submitted! ACH transfers scheduled.', 'success');
+            this.showToast('Payroll submitted! ACH transfers are being processed.', 'success');
             this.navigateTo('dashboard');
         } catch (err) { this.showToast('Payroll submission failed: ' + err.message, 'danger'); }
     },
@@ -2055,6 +2102,78 @@ const AeroApp = {
             this.showToast('Direct deposit preferences updated successfully.', 'success');
             this.navigateTo('employee-dashboard');
         } catch (err) { this.showToast('Failed to save deposit settings: ' + err.message, 'danger'); }
+    },
+
+    /**
+     * Open Stripe.js bank account collection flow for an employee.
+     * Calls the stripe-ach edge function to get a SetupIntent client_secret,
+     * then uses Stripe.js collectBankAccountForSetup to avoid routing/account
+     * numbers ever touching our servers.
+     */
+    linkAchBankAccount: async function(employeeId) {
+        const emp = this.state.employees.find(e => e.id === employeeId);
+        if (!emp) return;
+
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) { this.showToast('Please sign in first.', 'warning'); return; }
+
+        this.showToast('Opening bank account setup…', 'info');
+
+        try {
+            // 1. Get a SetupIntent client_secret from our edge function
+            const resp = await fetch(ACH_FUNCTION_URL, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body:    JSON.stringify({ action: 'setup_intent', employeeId }),
+            });
+            if (!resp.ok) throw new Error('Failed to create setup intent');
+            const { client_secret } = await resp.json();
+
+            // 2. Use Stripe.js to collect bank account via Financial Connections
+            const stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
+            const { setupIntent, error } = await stripe.collectBankAccountForSetup({
+                clientSecret: client_secret,
+                params: {
+                    payment_method_type: 'us_bank_account',
+                    payment_method_data: { billing_details: { name: emp.name, email: emp.email || '' } },
+                },
+                expand: ['payment_method'],
+            });
+
+            if (error) { this.showToast(error.message, 'danger'); return; }
+            if (setupIntent.status === 'requires_confirmation') {
+                const { setupIntent: confirmed, error: confirmErr } = await stripe.confirmUsBankAccountSetup(client_secret);
+                if (confirmErr) { this.showToast(confirmErr.message, 'danger'); return; }
+                if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
+                    this.showToast('Bank account verification pending — check your email.', 'info');
+                    return;
+                }
+            }
+
+            const pmId = setupIntent.payment_method?.id ?? setupIntent.payment_method;
+            if (!pmId) { this.showToast('Could not retrieve payment method — please try again.', 'danger'); return; }
+
+            // 3. Persist payment method ID to the employee record via edge function
+            const confirmResp = await fetch(ACH_FUNCTION_URL, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body:    JSON.stringify({ action: 'confirm_setup', employeeId, paymentMethodId: pmId }),
+            });
+            if (!confirmResp.ok) throw new Error('Failed to save bank account');
+            const { last4, routing } = await confirmResp.json();
+
+            // Update local state so the UI reflects the new bank account without a full reload
+            const idx = this.state.employees.indexOf(emp);
+            if (idx !== -1) {
+                this.state.employees[idx] = { ...emp, bankLast4: last4, bankRouting: routing, stripePmId: pmId };
+            }
+
+            this.showToast(`Bank account ending in ••••${last4} linked successfully.`, 'success');
+            this.navigateTo('employee-dashboard');
+        } catch (err) {
+            this.showToast('Bank account setup failed: ' + err.message, 'danger');
+        }
     },
 
     requestPayAdvance: async function(e) {

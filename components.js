@@ -2593,6 +2593,28 @@ function renderEmployeeDashboardView(state, employeeId) {
 
             <!-- Right Column: Direct Deposit Allocation & On-Demand Pay Advance -->
             <div style="display:flex; flex-direction:column; gap:24px;">
+                <!-- Card 0: ACH Bank Account Linking -->
+                <div class="card" style="padding:24px;">
+                    <div class="section-title" style="margin-bottom:12px; display:flex; flex-direction:column; align-items:flex-start; gap:4px;">
+                        <span style="font-size:16px;">Direct Deposit — Bank Account</span>
+                        <p style="font-size:12px; color:var(--text-secondary); margin:0;">Link a checking account to receive net pay via ACH on payday.</p>
+                    </div>
+                    ${employee.bankLast4 ? `
+                    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-secondary); padding:12px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:12px;">
+                        <div>
+                            <p style="margin:0; font-weight:600; font-size:14px;">Bank account ending in ••••${employee.bankLast4}</p>
+                            <p style="margin:0; font-size:12px; color:var(--text-secondary);">Routing: ${employee.bankRouting || '—'}</p>
+                        </div>
+                        <span style="font-size:11px; font-weight:700; padding:3px 10px; border-radius:var(--radius-full); background:var(--success-light); color:var(--success);">Linked</span>
+                    </div>
+                    <button class="btn btn-secondary" style="width:100%; justify-content:center;" onclick="AeroApp.linkAchBankAccount('${employee.id}')">Replace Bank Account</button>
+                    ` : `
+                    <button class="btn btn-primary" style="width:100%; justify-content:center; padding:10px 0;" onclick="AeroApp.linkAchBankAccount('${employee.id}')">
+                        Link Bank Account for ACH Deposit
+                    </button>
+                    `}
+                </div>
+
                 <!-- Card 1: Direct Deposit Allocation -->
                 <div class="card" style="padding:24px;">
                     <div class="section-title" style="margin-bottom:12px; display:flex; flex-direction:column; align-items:flex-start; gap:4px;">
