@@ -1,9 +1,9 @@
 /**
- * AeroPay — Environment Configuration
+ * GlidePay — Environment Configuration
  *
  * Auto-detects sandbox vs. live based on hostname.
  * localhost / 127.0.0.1 / *.local / *.vercel.app preview URLs → sandbox.
- * Everything else (aeropay.io) → live.
+ * Everything else (glidepay.org) → live.
  *
  * To force sandbox on any host: add ?sandbox=1 to the URL, or set
  *   localStorage.setItem('aeropay_env', 'sandbox')
@@ -55,7 +55,7 @@ const AeroConfig = (() => {
 
     if (env === "sandbox") {
         console.info(
-            "%c[AeroPay] Running in SANDBOX mode — no real money will move.",
+            "%c[GlidePay] Running in SANDBOX mode — no real money will move.",
             "background:#f59e0b;color:#fff;padding:2px 6px;border-radius:3px;font-weight:bold;"
         );
     }

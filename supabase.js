@@ -1,8 +1,8 @@
 /**
- * AeroPay — Supabase Data Layer
+ * GlidePay — Supabase Data Layer
  * Replaces all localStorage state with real database operations.
  *
- * Project : AeroPay
+ * Project : GlidePay
  * URL     : https://ojvnxnlrghatkwjrlnop.supabase.co
  *
  * Usage in app.js / index.html:

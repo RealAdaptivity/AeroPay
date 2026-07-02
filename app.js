@@ -1,5 +1,5 @@
 /**
- * AeroPay Core Orchestrator & State Manager
+ * GlidePay Core Orchestrator & State Manager
  */
 
 // Resolved from config.js — switches between sandbox and live automatically.
@@ -386,7 +386,7 @@ const AeroApp = {
             await _sb.from('companies').update({ setup_complete: true }).eq('id', company.id);
             this.state.settings.setupComplete = true;
             await AeroDB.addAuditLog('Setup Completed', 'First-run setup wizard completed', 'settings');
-            this.showToast('Setup complete — welcome to AeroPay! 🎉', 'success');
+            this.showToast('Setup complete — welcome to GlidePay! 🎉', 'success');
         } catch (_) {}
         this.navigateTo(destination === 'payroll' ? 'payroll' : 'dashboard');
     },
@@ -457,7 +457,7 @@ const AeroApp = {
                 htmlContent = renderSetupWizardView(this.state, this.setupStep || 1);
                 break;
             case 'landing':
-                titleText = "Welcome to AeroPay";
+                titleText = "Welcome to GlidePay";
                 subtitleText = "Autonomous Payroll & Tax Engine";
                 htmlContent = renderLandingPageView(this.state);
                 break;
@@ -1722,7 +1722,7 @@ const AeroApp = {
         const titles = {
             company:  ['Secure Login Portal',   'Authenticate to view payroll data'],
             employee: ['Employee Portal',        'Sign in with your work email'],
-            register: ['Create Free Account',    'Set up AeroPay for your company'],
+            register: ['Create Free Account',    'Set up GlidePay for your company'],
         };
         Object.keys(tabs).forEach(key => {
             document.getElementById(tabs[key])?.classList.toggle('active', key === tab);

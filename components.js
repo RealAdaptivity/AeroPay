@@ -1,5 +1,5 @@
 /**
- * AeroPay UI Components Renderers
+ * GlidePay UI Components Renderers
  * Responsible for drawing HTML and interactive elements for all router views.
  */
 
@@ -455,7 +455,7 @@ function renderSetupWizardView(state, step) {
         3: `<div class="setup-body">
             <div class="setup-icon">🏦</div>
             <h2 class="setup-title">Connect your bank account</h2>
-            <p class="setup-desc">AeroPay debits this account to fund payroll ACH transfers. Details are encrypted end-to-end.</p>
+            <p class="setup-desc">GlidePay debits this account to fund payroll ACH transfers. Details are encrypted end-to-end.</p>
             <form id="setupStep3Form" onsubmit="AeroApp.setupNext(event,3)" style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">
                 <div class="form-group" style="margin:0;"><label>Bank Name</label><input type="text" class="form-control" id="setupBankName" value="${bank}" placeholder="Chase, Bank of America…" required></div>
                 <div class="form-group" style="margin:0;"><label>Routing Number</label><input type="text" class="form-control" id="setupRouting" value="${route}" placeholder="9-digit ABA number" maxlength="9" required></div>
@@ -475,7 +475,7 @@ function renderSetupWizardView(state, step) {
         4: `<div class="setup-body" style="text-align:center;">
             <div class="setup-icon">🚀</div>
             <h2 class="setup-title">You're all set!</h2>
-            <p class="setup-desc">${state.employees.length > 0 ? `You have ${state.employees.length} employee${state.employees.length > 1 ? 's' : ''} ready. Run your first payroll to see AeroPay in action.` : "Your account is configured. Add employees and run payroll whenever you're ready."}</p>
+            <p class="setup-desc">${state.employees.length > 0 ? `You have ${state.employees.length} employee${state.employees.length > 1 ? 's' : ''} ready. Run your first payroll to see GlidePay in action.` : "Your account is configured. Add employees and run payroll whenever you're ready."}</p>
             <div class="setup-checklist">
                 <div class="setup-check-item ${state.settings?.companyName ? 'done' : ''}"><span class="setup-check-icon">${state.settings?.companyName ? '✓' : '○'}</span> Company profile</div>
                 <div class="setup-check-item ${state.employees.length > 0 ? 'done' : ''}"><span class="setup-check-icon">${state.employees.length > 0 ? '✓' : '○'}</span> First employee added</div>
@@ -493,13 +493,13 @@ function renderSetupWizardView(state, step) {
     <div class="setup-wizard-wrap">
         <div class="setup-sidebar">
             <div class="setup-sidebar-brand">
-                <div style="width:36px;height:36px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));color:white;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-heading);font-size:16px;">A</div>
-                <span style="font-family:var(--font-heading);font-weight:700;font-size:18px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">AeroPay</span>
+                <div style="width:36px;height:36px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));color:white;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-heading);font-size:16px;">G</div>
+                <span style="font-family:var(--font-heading);font-weight:700;font-size:18px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">GlidePay</span>
             </div>
             <div class="setup-progress-bar-wrap"><div class="setup-progress-bar-fill" style="width:${progressPct}%;"></div></div>
             <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:24px;">Step ${step} of ${steps.length}</p>
             <div class="setup-step-list">${stepNav}</div>
-            <div class="setup-sidebar-footer"><p style="font-size:11px;color:var(--text-tertiary);">Need help? <a href="mailto:support@aeropay.io" style="color:var(--primary);">support@aeropay.io</a></p></div>
+            <div class="setup-sidebar-footer"><p style="font-size:11px;color:var(--text-tertiary);">Need help? <a href="mailto:support@glidepay.org" style="color:var(--primary);">support@glidepay.org</a></p></div>
         </div>
         <div class="setup-main">${bodies[step] || bodies[1]}</div>
     </div>`;
@@ -515,7 +515,7 @@ function renderDashboardView(state) {
         <div class="autopilot-banner">
             <div class="autopilot-details">
                 <span class="autopilot-title">Smart Autopilot Enabled</span>
-                <span class="autopilot-desc">AeroPay is set to auto-process your next payroll in 6 days. Standard deductions and timesheet hours will be synced automatically.</span>
+                <span class="autopilot-desc">GlidePay is set to auto-process your next payroll in 6 days. Standard deductions and timesheet hours will be synced automatically.</span>
             </div>
             <button class="btn btn-primary" onclick="AeroApp.showToast('Autopilot options configured!', 'success')">Configure</button>
         </div>
@@ -1570,7 +1570,7 @@ function renderSettingsView(state) {
                 ${_connectStatusBadge(connectStatus)}
             </div>
             <p style="font-size:13px; color:var(--text-secondary); margin-bottom:20px;">
-                AeroPay uses Stripe Treasury to send ACH direct deposits to your employees. Complete Stripe's one-time onboarding to activate.
+                GlidePay uses Stripe Treasury to send ACH direct deposits to your employees. Complete Stripe's one-time onboarding to activate.
             </p>
 
             ${connectStatus === 'not_created' ? `
@@ -1667,7 +1667,7 @@ function getPaystubHTML(employee, calcDetails, dateRange) {
                 </div>
                 <div style="text-align:right;">
                     <div class="paystub-title">Pay Statement</div>
-                    <div style="font-size:12px; color:#64748b; font-weight:600;">AeroPay Automated File</div>
+                    <div style="font-size:12px; color:#64748b; font-weight:600;">GlidePay Automated File</div>
                 </div>
             </div>
             
@@ -1841,7 +1841,7 @@ function getPaystubHTML(employee, calcDetails, dateRange) {
             </div>
             
             <div style="border-top:1px dashed #cbd5e1; margin-top:30px; padding-top:15px; font-size:10px; color:#64748b; text-align:center;">
-                AeroPay Payroll Systems Inc. - Secure Automated Direct Deposit Statement - Keep for your records.
+                GlidePay Payroll Systems Inc. - Secure Automated Direct Deposit Statement - Keep for your records.
             </div>
         </div>
     `;
@@ -1873,7 +1873,7 @@ function getForm941HTML(state) {
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:18px; font-weight:800;">2026</div>
-                    <div style="font-size:10px; font-weight:600;">AeroPay E-File Pre-populated</div>
+                    <div style="font-size:10px; font-weight:600;">GlidePay E-File Pre-populated</div>
                 </div>
             </div>
             
@@ -1888,7 +1888,7 @@ function getForm941HTML(state) {
                     <div style="font-weight:700;">Report for this Quarter</div>
                     <div style="font-size:14px; font-weight:600; margin-top:4px;">2nd Quarter (Apr, May, Jun 2026)</div>
                     <div style="font-weight:700; margin-top:8px;">Trade Name</div>
-                    <div>AeroPay Client Account</div>
+                    <div>GlidePay Client Account</div>
                 </div>
             </div>
             
@@ -2014,7 +2014,7 @@ function getW2HTML(employee, state, sigRecord) {
                     </div>
                     <div style="border-bottom:1px solid #b45309; padding:6px;">
                         <span style="font-weight:700; color:#92400e; font-size:9px; display:block;">c. Employer's name, address, and ZIP code</span>
-                        <span style="font-weight:600;">${state.settings.companyName}<br/>AeroPay Registered Suite 200</span>
+                        <span style="font-weight:600;">${state.settings.companyName}<br/>GlidePay Registered Suite 200</span>
                     </div>
                     <div style="padding:6px;">
                         <span style="font-weight:700; color:#92400e; font-size:9px; display:block;">e. Employee's name</span>
@@ -2067,7 +2067,7 @@ function getW2HTML(employee, state, sigRecord) {
             </div>
             
             <div style="margin-top:12px; text-align:center; font-size:9px; color:#6b7280;">
-                Copy B - To be filed with employee's Federal Tax Return. Pre-populated automatically by AeroPay.
+                Copy B - To be filed with employee's Federal Tax Return. Pre-populated automatically by GlidePay.
             </div>
 
             ${sigRecord ? `
@@ -2182,8 +2182,8 @@ function renderLandingPageView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo">
-                    <div class="logo-box">A</div>
-                    <div class="logo-text">AeroPay</div>
+                    <div class="logo-box">G</div>
+                    <div class="logo-text">GlidePay</div>
                 </div>
                 <div>
                     <!-- Theme Toggle -->
@@ -2198,7 +2198,7 @@ function renderLandingPageView(state) {
                     <span class="landing-badge">Next-Gen Fintech</span>
                     <h1 class="landing-title">The Smart <span>Compliance & Payroll Autopilot</span> for Modern Teams</h1>
                     <p class="landing-desc">
-                        AeroPay is the first automated payroll engine with built-in real-time tax calculation, same-day direct deposits, and instant ledger accounting integrations. Register, calculate, and e-file in all 50 states with zero human intervention.
+                        GlidePay is the first automated payroll engine with built-in real-time tax calculation, same-day direct deposits, and instant ledger accounting integrations. Register, calculate, and e-file in all 50 states with zero human intervention.
                     </p>
                     
                     <div class="landing-bullets">
@@ -2311,7 +2311,7 @@ function renderLandingPageView(state) {
                             <div style="display:flex;flex-direction:column;gap:14px;margin-top:16px;">
                                 <div class="form-group" style="margin:0;"><label class="login-label">Company Legal Name</label><input type="text" class="form-control" id="regCompanyName" placeholder="Acme Corp LLC" required></div>
                                 <div class="form-group" style="margin:0;"><label class="login-label">EIN / Tax ID <span style="color:var(--text-tertiary);font-weight:400;">(optional)</span></label><input type="text" class="form-control" id="regEIN" placeholder="XX-XXXXXXX"></div>
-                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to AeroPay's <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('terms-of-service');" style="color:var(--primary);">Terms of Service</a> and <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a></span></label>
+                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to GlidePay's <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('terms-of-service');" style="color:var(--primary);">Terms of Service</a> and <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a></span></label>
                             </div>
                             <div style="display:flex;gap:10px;margin-top:20px;">
                                 <button type="button" class="btn btn-secondary" style="flex:0 0 auto;" onclick="AeroApp.regPrevStep()">← Back</button>
@@ -2348,7 +2348,7 @@ function renderLandingPageView(state) {
                 <div class="comparison-header">
                     <h2 class="comparison-section-title">Engineered to Outperform Legacy Systems</h2>
                     <p class="landing-desc" style="max-width:700px; margin: 0 auto;">
-                        See how AeroPay compares head-to-head with traditional payroll providers like Gusto, ADP, Rippling, and Paychex.
+                        See how GlidePay compares head-to-head with traditional payroll providers like Gusto, ADP, Rippling, and Paychex.
                     </p>
                     <div class="comparison-filters">
                         <button class="filter-btn active" id="btnFilterAll" onclick="AeroApp.filterComparisonTable('all')">Show All Features</button>
@@ -2362,7 +2362,7 @@ function renderLandingPageView(state) {
                         <thead>
                             <tr>
                                 <th>Capabilities & Features</th>
-                                <th style="color: var(--primary);">AeroPay</th>
+                                <th style="color: var(--primary);">GlidePay</th>
                                 <th>Gusto</th>
                                 <th>ADP Run</th>
                                 <th>Rippling</th>
@@ -2466,8 +2466,8 @@ function renderPrivacyPolicyView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
-                    <div class="logo-box">A</div>
-                    <div class="logo-text">AeroPay</div>
+                    <div class="logo-box">G</div>
+                    <div class="logo-text">GlidePay</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
                     <button class="btn btn-outline" onclick="AeroApp.navigateTo('landing')" style="display:inline-flex;align-items:center;gap:6px;">
@@ -2487,7 +2487,7 @@ function renderPrivacyPolicyView(state) {
                     <p class="legal-updated">Last updated: ${lastUpdated}</p>
 
                     <p class="legal-intro">
-                        AeroPay ("AeroPay," "we," "us," or "our") provides an automated payroll, tax
+                        GlidePay ("GlidePay," "we," "us," or "our") provides an automated payroll, tax
                         compliance, and workforce management platform. This Privacy Policy explains how we
                         collect, use, disclose, and safeguard information when you use our website,
                         applications, and related services (collectively, the "Services"). Because payroll
@@ -2578,11 +2578,11 @@ function renderPrivacyPolicyView(state) {
                     <h2 class="legal-heading">10. Contact Us</h2>
                     <p>
                         If you have questions about this Privacy Policy or how we handle your data, contact
-                        our privacy team at <a href="mailto:privacy@aeropay.com" style="color:var(--primary);">privacy@aeropay.com</a>.
+                        our privacy team at <a href="mailto:privacy@glidepay.org" style="color:var(--primary);">privacy@glidepay.org</a>.
                     </p>
 
                     <div class="legal-footer-actions">
-                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to AeroPay</button>
+                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to GlidePay</button>
                     </div>
                 </div>
             </main>
@@ -2597,8 +2597,8 @@ function renderTermsOfServiceView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
-                    <div class="logo-box">A</div>
-                    <div class="logo-text">AeroPay</div>
+                    <div class="logo-box">G</div>
+                    <div class="logo-text">GlidePay</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
                     <button class="btn btn-outline" onclick="AeroApp.navigateTo('landing')" style="display:inline-flex;align-items:center;gap:6px;">
@@ -2618,10 +2618,10 @@ function renderTermsOfServiceView(state) {
                     <p class="legal-updated">Last updated: ${lastUpdated}</p>
 
                     <p class="legal-intro">
-                        These Terms of Service ("Terms") govern your access to and use of the AeroPay
+                        These Terms of Service ("Terms") govern your access to and use of the GlidePay
                         payroll, tax compliance, and workforce management platform, including our website,
                         applications, and related services (collectively, the "Services") provided by
-                        AeroPay ("AeroPay," "we," "us," or "our"). By creating an account, checking the box
+                        GlidePay ("GlidePay," "we," "us," or "our"). By creating an account, checking the box
                         to accept these Terms, or otherwise using the Services, you agree to be bound by
                         these Terms. If you are entering into these Terms on behalf of a company, you
                         represent that you have authority to bind that company.
@@ -2637,7 +2637,7 @@ function renderTermsOfServiceView(state) {
 
                     <h2 class="legal-heading">2. Description of the Services</h2>
                     <p>
-                        AeroPay provides tools to run payroll, calculate and file payroll taxes, settle
+                        GlidePay provides tools to run payroll, calculate and file payroll taxes, settle
                         direct deposits, track time, and manage benefits, PTO, and related workforce data.
                         Features, availability, and pricing may change over time. We may modify, suspend, or
                         discontinue any part of the Services with reasonable notice where practicable.
@@ -2645,7 +2645,7 @@ function renderTermsOfServiceView(state) {
 
                     <h2 class="legal-heading">3. Your Responsibilities</h2>
                     <ul class="legal-list">
-                        <li><strong>Accurate data:</strong> You are responsible for entering correct employee classifications, compensation, tax elections, bank details, and hours. AeroPay relies on the data you provide to run payroll and file taxes.</li>
+                        <li><strong>Accurate data:</strong> You are responsible for entering correct employee classifications, compensation, tax elections, bank details, and hours. GlidePay relies on the data you provide to run payroll and file taxes.</li>
                         <li><strong>Sufficient funds:</strong> You must ensure sufficient funds are available to cover payroll runs, taxes, and applicable fees on scheduled dates.</li>
                         <li><strong>Legal compliance:</strong> You are responsible for complying with applicable employment, wage-and-hour, and tax laws that apply to your business.</li>
                         <li><strong>Timely review:</strong> You are responsible for reviewing and approving payroll runs and filings before they are finalized.</li>
@@ -2662,10 +2662,10 @@ function renderTermsOfServiceView(state) {
 
                     <h2 class="legal-heading">5. Tax Filings &amp; Payments</h2>
                     <p>
-                        Where you enable automated tax filing, you authorize AeroPay to prepare, file, and
+                        Where you enable automated tax filing, you authorize GlidePay to prepare, file, and
                         remit payroll taxes to applicable federal, state, and local authorities based on the
                         information you provide. You remain responsible for the accuracy of that information
-                        and for any liabilities arising from data you supply. AeroPay is not liable for
+                        and for any liabilities arising from data you supply. GlidePay is not liable for
                         penalties or interest resulting from inaccurate or untimely information provided by
                         you, insufficient funds, or filings outside the scope of the Services.
                     </p>
@@ -2682,8 +2682,8 @@ function renderTermsOfServiceView(state) {
 
                     <h2 class="legal-heading">7. Intellectual Property</h2>
                     <p>
-                        The Services, including all software, design, and content provided by AeroPay, are
-                        owned by AeroPay or its licensors and are protected by intellectual property laws.
+                        The Services, including all software, design, and content provided by GlidePay, are
+                        owned by GlidePay or its licensors and are protected by intellectual property laws.
                         We grant you a limited, non-exclusive, non-transferable right to use the Services for
                         your internal business purposes during your subscription. You retain ownership of the
                         data you submit ("Customer Data") and grant us the rights necessary to process it to
@@ -2710,13 +2710,13 @@ function renderTermsOfServiceView(state) {
                     <p>
                         The Services are provided "as is" and "as available" without warranties of any kind,
                         whether express or implied, including warranties of merchantability, fitness for a
-                        particular purpose, and non-infringement. AeroPay does not provide legal, tax, or
+                        particular purpose, and non-infringement. GlidePay does not provide legal, tax, or
                         accounting advice, and the Services are not a substitute for professional advice.
                     </p>
 
                     <h2 class="legal-heading">11. Limitation of Liability</h2>
                     <p>
-                        To the maximum extent permitted by law, AeroPay will not be liable for any indirect,
+                        To the maximum extent permitted by law, GlidePay will not be liable for any indirect,
                         incidental, special, consequential, or punitive damages, or for lost profits or
                         revenues. Our aggregate liability arising out of or relating to the Services will not
                         exceed the fees you paid to us in the twelve (12) months preceding the event giving
@@ -2745,7 +2745,7 @@ function renderTermsOfServiceView(state) {
                     <h2 class="legal-heading">14. Governing Law</h2>
                     <p>
                         These Terms are governed by the laws of the United States and the state in which
-                        AeroPay is organized, without regard to conflict-of-laws principles. Any disputes
+                        GlidePay is organized, without regard to conflict-of-laws principles. Any disputes
                         will be resolved in the courts located in that jurisdiction, unless otherwise
                         required by applicable law.
                     </p>
@@ -2753,11 +2753,11 @@ function renderTermsOfServiceView(state) {
                     <h2 class="legal-heading">15. Contact Us</h2>
                     <p>
                         If you have questions about these Terms, contact us at
-                        <a href="mailto:legal@aeropay.com" style="color:var(--primary);">legal@aeropay.com</a>.
+                        <a href="mailto:legal@glidepay.org" style="color:var(--primary);">legal@glidepay.org</a>.
                     </p>
 
                     <div class="legal-footer-actions">
-                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to AeroPay</button>
+                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to GlidePay</button>
                     </div>
                 </div>
             </main>
@@ -3560,7 +3560,7 @@ function getContractorReceiptHTML(employee, calcDetails, dateRange) {
             </div>
             
             <div style="border-top:1px dashed #cbd5e1; margin-top:30px; padding-top:15px; font-size:10px; color:#64748b; text-align:center;">
-                AeroPay Payroll Systems Inc. - 1099 Professional Services Direct Deposit Statement - Keep for tax records.
+                GlidePay Payroll Systems Inc. - 1099 Professional Services Direct Deposit Statement - Keep for tax records.
             </div>
         </div>
     `;
@@ -3602,7 +3602,7 @@ function get1099NECHTML(employee, state) {
                 <div style="border-right:1px solid #ea580c;">
                     <div style="border-bottom:1px solid #ea580c; padding:6px;">
                         <span style="font-weight:700; color:#c2410c; font-size:9px; display:block;">PAYER'S name, street address, city or town, state or province, country, ZIP</span>
-                        <span style="font-weight:600;">${state.settings.companyName || 'Zenith Corp'}<br/>AeroPay Suite 200</span>
+                        <span style="font-weight:600;">${state.settings.companyName || 'Zenith Corp'}<br/>GlidePay Suite 200</span>
                     </div>
                     <div style="border-bottom:1px solid #ea580c; padding:6px;">
                         <span style="font-weight:700; color:#c2410c; font-size:9px; display:block;">PAYER'S TIN</span>
@@ -3641,7 +3641,7 @@ function get1099NECHTML(employee, state) {
             </div>
             
             <div style="margin-top:12px; text-align:center; font-size:9px; color:#4b5563;">
-                Copy B - For Recipient. Pre-populated automatically by AeroPay compliance module.
+                Copy B - For Recipient. Pre-populated automatically by GlidePay compliance module.
             </div>
         </div>
     `;

@@ -1,5 +1,5 @@
 /**
- * AeroPay — Billing Module
+ * GlidePay — Billing Module
  * Handles Stripe Checkout, Customer Portal, and subscription state.
  *
  * Add to index.html AFTER config.js and supabase.js:
@@ -201,7 +201,7 @@ const AeroBilling = {
     handleCheckoutReturn() {
         const params = new URLSearchParams(window.location.search);
         if (params.get("checkout") === "success") {
-            AeroApp.showToast("🎉 Subscription activated! Welcome to AeroPay.", "success");
+            AeroApp.showToast("🎉 Subscription activated! Welcome to GlidePay.", "success");
             // Clean the URL
             window.history.replaceState({}, "", window.location.pathname);
             // Give webhook a moment then refresh billing banner
@@ -238,7 +238,7 @@ const AeroBilling = {
             <!-- No active plan -->
             <div style="padding:24px; text-align:center; border:1px dashed var(--border-color); border-radius:var(--radius-md); margin-bottom:24px;">
                 <div style="font-size:32px; margin-bottom:12px;">🚀</div>
-                <h3 style="font-family:var(--font-heading); margin-bottom:8px;">Start your AeroPay subscription</h3>
+                <h3 style="font-family:var(--font-heading); margin-bottom:8px;">Start your GlidePay subscription</h3>
                 <p style="font-size:14px; color:var(--text-secondary); margin-bottom:20px;">
                     $29/mo base + $4/employee · Instant activation · Cancel any time
                 </p>
@@ -260,7 +260,7 @@ const AeroBilling = {
             <div class="billing-info-grid">
                 <div class="billing-info-item">
                     <span class="billing-info-label">Plan</span>
-                    <span class="billing-info-value">AeroPay — ${sub.seat_count} seat${sub.seat_count !== 1 ? "s" : ""}</span>
+                    <span class="billing-info-value">GlidePay — ${sub.seat_count} seat${sub.seat_count !== 1 ? "s" : ""}</span>
                 </div>
                 <div class="billing-info-item">
                     <span class="billing-info-label">Monthly Total</span>
