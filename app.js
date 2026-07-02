@@ -416,7 +416,7 @@ const AeroApp = {
 
     navigateTo: function(viewName) {
         // Enforce guest state limits (some views are public and viewable while logged out)
-        const publicViews = ['landing', 'privacy-policy'];
+        const publicViews = ['landing', 'privacy-policy', 'terms-of-service'];
         if (!publicViews.includes(viewName) && (!this.session || !this.session.isLoggedIn)) {
             viewName = 'landing';
         }
@@ -434,7 +434,7 @@ const AeroApp = {
         });
 
         // Update body class depending on route and session
-        if (viewName === 'landing' || viewName === 'setup' || viewName === 'privacy-policy') {
+        if (viewName === 'landing' || viewName === 'setup' || viewName === 'privacy-policy' || viewName === 'terms-of-service') {
             document.body.className = 'guest-mode';
         } else if (this.session && this.session.role === 'employee') {
             document.body.className = 'employee-mode';
@@ -465,6 +465,11 @@ const AeroApp = {
                 titleText = "Privacy Policy";
                 subtitleText = "";
                 htmlContent = renderPrivacyPolicyView(this.state);
+                break;
+            case 'terms-of-service':
+                titleText = "Terms of Service";
+                subtitleText = "";
+                htmlContent = renderTermsOfServiceView(this.state);
                 break;
             case 'employee-dashboard':
                 const empForDash = this.state.employees.find(e => e.id === this.session.employeeId);

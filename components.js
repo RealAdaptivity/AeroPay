@@ -2311,7 +2311,7 @@ function renderLandingPageView(state) {
                             <div style="display:flex;flex-direction:column;gap:14px;margin-top:16px;">
                                 <div class="form-group" style="margin:0;"><label class="login-label">Company Legal Name</label><input type="text" class="form-control" id="regCompanyName" placeholder="Acme Corp LLC" required></div>
                                 <div class="form-group" style="margin:0;"><label class="login-label">EIN / Tax ID <span style="color:var(--text-tertiary);font-weight:400;">(optional)</span></label><input type="text" class="form-control" id="regEIN" placeholder="XX-XXXXXXX"></div>
-                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to AeroPay's <a href="#" style="color:var(--primary);">Terms of Service</a> and <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a></span></label>
+                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to AeroPay's <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('terms-of-service');" style="color:var(--primary);">Terms of Service</a> and <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a></span></label>
                             </div>
                             <div style="display:flex;gap:10px;margin-top:20px;">
                                 <button type="button" class="btn btn-secondary" style="flex:0 0 auto;" onclick="AeroApp.regPrevStep()">← Back</button>
@@ -2579,6 +2579,181 @@ function renderPrivacyPolicyView(state) {
                     <p>
                         If you have questions about this Privacy Policy or how we handle your data, contact
                         our privacy team at <a href="mailto:privacy@aeropay.com" style="color:var(--primary);">privacy@aeropay.com</a>.
+                    </p>
+
+                    <div class="legal-footer-actions">
+                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to AeroPay</button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    `;
+}
+
+// 11c. Render Terms of Service (public, standalone page)
+function renderTermsOfServiceView(state) {
+    const lastUpdated = "July 2, 2026";
+    return `
+        <div class="landing-page">
+            <header class="landing-header">
+                <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
+                    <div class="logo-box">A</div>
+                    <div class="logo-text">AeroPay</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <button class="btn btn-outline" onclick="AeroApp.navigateTo('landing')" style="display:inline-flex;align-items:center;gap:6px;">
+                        <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        Back
+                    </button>
+                    <button class="btn-icon-only theme-toggle-landing" onclick="AeroApp.toggleTheme()" title="Toggle Light/Dark Theme" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
+                        <svg style="width:20px;height:20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    </button>
+                </div>
+            </header>
+
+            <main class="legal-page-container">
+                <div class="legal-doc card">
+                    <span class="landing-badge">Legal</span>
+                    <h1 class="legal-title">Terms of Service</h1>
+                    <p class="legal-updated">Last updated: ${lastUpdated}</p>
+
+                    <p class="legal-intro">
+                        These Terms of Service ("Terms") govern your access to and use of the AeroPay
+                        payroll, tax compliance, and workforce management platform, including our website,
+                        applications, and related services (collectively, the "Services") provided by
+                        AeroPay ("AeroPay," "we," "us," or "our"). By creating an account, checking the box
+                        to accept these Terms, or otherwise using the Services, you agree to be bound by
+                        these Terms. If you are entering into these Terms on behalf of a company, you
+                        represent that you have authority to bind that company.
+                    </p>
+
+                    <h2 class="legal-heading">1. Eligibility &amp; Accounts</h2>
+                    <ul class="legal-list">
+                        <li>You must be at least 18 years old and able to form a binding contract to use the Services.</li>
+                        <li>You are responsible for the accuracy of the company, employee, and tax information you provide.</li>
+                        <li>You are responsible for safeguarding your login credentials and for all activity that occurs under your account, and must notify us promptly of any unauthorized use.</li>
+                        <li>Administrators are responsible for managing the access and permissions of employees and other users they invite.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">2. Description of the Services</h2>
+                    <p>
+                        AeroPay provides tools to run payroll, calculate and file payroll taxes, settle
+                        direct deposits, track time, and manage benefits, PTO, and related workforce data.
+                        Features, availability, and pricing may change over time. We may modify, suspend, or
+                        discontinue any part of the Services with reasonable notice where practicable.
+                    </p>
+
+                    <h2 class="legal-heading">3. Your Responsibilities</h2>
+                    <ul class="legal-list">
+                        <li><strong>Accurate data:</strong> You are responsible for entering correct employee classifications, compensation, tax elections, bank details, and hours. AeroPay relies on the data you provide to run payroll and file taxes.</li>
+                        <li><strong>Sufficient funds:</strong> You must ensure sufficient funds are available to cover payroll runs, taxes, and applicable fees on scheduled dates.</li>
+                        <li><strong>Legal compliance:</strong> You are responsible for complying with applicable employment, wage-and-hour, and tax laws that apply to your business.</li>
+                        <li><strong>Timely review:</strong> You are responsible for reviewing and approving payroll runs and filings before they are finalized.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">4. Fees &amp; Payment</h2>
+                    <p>
+                        You agree to pay the subscription and per-employee fees described at sign-up or in
+                        your plan, along with any applicable taxes. Fees are billed on a recurring basis and
+                        are non-refundable except where required by law. We may update pricing with advance
+                        notice; continued use after a price change constitutes acceptance. Failure to pay
+                        may result in suspension or termination of the Services.
+                    </p>
+
+                    <h2 class="legal-heading">5. Tax Filings &amp; Payments</h2>
+                    <p>
+                        Where you enable automated tax filing, you authorize AeroPay to prepare, file, and
+                        remit payroll taxes to applicable federal, state, and local authorities based on the
+                        information you provide. You remain responsible for the accuracy of that information
+                        and for any liabilities arising from data you supply. AeroPay is not liable for
+                        penalties or interest resulting from inaccurate or untimely information provided by
+                        you, insufficient funds, or filings outside the scope of the Services.
+                    </p>
+
+                    <h2 class="legal-heading">6. Acceptable Use</h2>
+                    <p>You agree not to:</p>
+                    <ul class="legal-list">
+                        <li>Use the Services for any unlawful, fraudulent, or unauthorized purpose.</li>
+                        <li>Attempt to gain unauthorized access to the Services, other accounts, or our systems.</li>
+                        <li>Interfere with or disrupt the integrity or performance of the Services.</li>
+                        <li>Reverse engineer, resell, or misuse the Services except as expressly permitted.</li>
+                        <li>Upload malicious code or submit data you do not have the right to provide.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">7. Intellectual Property</h2>
+                    <p>
+                        The Services, including all software, design, and content provided by AeroPay, are
+                        owned by AeroPay or its licensors and are protected by intellectual property laws.
+                        We grant you a limited, non-exclusive, non-transferable right to use the Services for
+                        your internal business purposes during your subscription. You retain ownership of the
+                        data you submit ("Customer Data") and grant us the rights necessary to process it to
+                        provide the Services.
+                    </p>
+
+                    <h2 class="legal-heading">8. Privacy</h2>
+                    <p>
+                        Your use of the Services is also governed by our
+                        <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a>,
+                        which explains how we collect, use, and protect personal and financial data. By using
+                        the Services, you consent to those practices.
+                    </p>
+
+                    <h2 class="legal-heading">9. Third-Party Services</h2>
+                    <p>
+                        The Services may integrate with third-party providers (such as banking/ACH networks,
+                        payment processors, and accounting platforms like QuickBooks or Xero). Your use of
+                        those integrations may be subject to the third party's own terms, and we are not
+                        responsible for third-party services.
+                    </p>
+
+                    <h2 class="legal-heading">10. Disclaimers</h2>
+                    <p>
+                        The Services are provided "as is" and "as available" without warranties of any kind,
+                        whether express or implied, including warranties of merchantability, fitness for a
+                        particular purpose, and non-infringement. AeroPay does not provide legal, tax, or
+                        accounting advice, and the Services are not a substitute for professional advice.
+                    </p>
+
+                    <h2 class="legal-heading">11. Limitation of Liability</h2>
+                    <p>
+                        To the maximum extent permitted by law, AeroPay will not be liable for any indirect,
+                        incidental, special, consequential, or punitive damages, or for lost profits or
+                        revenues. Our aggregate liability arising out of or relating to the Services will not
+                        exceed the fees you paid to us in the twelve (12) months preceding the event giving
+                        rise to the claim.
+                    </p>
+
+                    <h2 class="legal-heading">12. Termination</h2>
+                    <p>
+                        You may stop using the Services and cancel your subscription at any time. We may
+                        suspend or terminate your access if you breach these Terms, fail to pay fees, or use
+                        the Services in a way that creates risk or legal exposure. Upon termination, your
+                        right to use the Services ends, though certain provisions (such as fees owed,
+                        disclaimers, and limitations of liability) survive. We will make Customer Data
+                        available for export for a reasonable period as described in our Privacy Policy and
+                        applicable law.
+                    </p>
+
+                    <h2 class="legal-heading">13. Changes to These Terms</h2>
+                    <p>
+                        We may update these Terms from time to time. When we make material changes, we will
+                        update the "Last updated" date above and, where appropriate, provide additional
+                        notice. Your continued use of the Services after changes take effect constitutes
+                        acceptance of the revised Terms.
+                    </p>
+
+                    <h2 class="legal-heading">14. Governing Law</h2>
+                    <p>
+                        These Terms are governed by the laws of the United States and the state in which
+                        AeroPay is organized, without regard to conflict-of-laws principles. Any disputes
+                        will be resolved in the courts located in that jurisdiction, unless otherwise
+                        required by applicable law.
+                    </p>
+
+                    <h2 class="legal-heading">15. Contact Us</h2>
+                    <p>
+                        If you have questions about these Terms, contact us at
+                        <a href="mailto:legal@aeropay.com" style="color:var(--primary);">legal@aeropay.com</a>.
                     </p>
 
                     <div class="legal-footer-actions">
