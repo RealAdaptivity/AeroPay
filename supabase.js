@@ -987,6 +987,71 @@ const AeroDB = {
     },
 
     // ─────────────────────────────────────────
+    // TAX E-FILE (third-party provider transmission)
+    // ─────────────────────────────────────────
+
+    /** Return e-file submissions for the current company, keyed by form_ref. */
+    async getTaxFilings() {
+        const { data } = await _sb.from('tax_filing_submissions')
+            .select('*')
+            .order('updated_at', { ascending: false });
+        return (data || []).map(r => ({
+            id:                     r.id,
+            form_ref:               r.form_ref,
+            form_type:              r.form_type,
+            period:                 r.period,
+            agency:                 r.agency,
+            amount:                 parseFloat(r.amount),
+            provider:               r.provider,
+            provider_submission_id: r.provider_submission_id,
+            status:                 r.status,
+            status_detail:          r.status_detail,
+            submitted_at:           r.submitted_at,
+            updated_at:             r.updated_at,
+        }));
+    },
+
+    /** Authenticated POST to the file-tax edge function. */
+    async _invokeFileTax(payload) {
+        const url = (typeof AeroConfig !== 'undefined' && AeroConfig.fileTaxFunctionUrl) || '';
+        if (!url) throw new Error('E-file function URL is not configured.');
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) throw new Error('You must be signed in to e-file.');
+
+        const resp = await fetch(url, {
+            method:  'POST',
+            headers: {
+                'Content-Type':  'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json().catch(() => ({}));
+        // A configured=false body means no provider is connected yet — surface it
+        // to the caller rather than treating it as a hard failure.
+        if (!resp.ok && data.configured !== false) {
+            throw new Error(data.error || `E-file request failed (${resp.status})`);
+        }
+        return data;
+    },
+
+    /** Submit a filing to the e-file provider. Returns the provider response. */
+    async submitEfile({ formRef, formType, period, agency, amount, formData }) {
+        return this._invokeFileTax({
+            action: 'submit',
+            formRef, formType, period, agency,
+            amount: amount || 0,
+            formData: formData || {},
+        });
+    },
+
+    /** Poll the provider for the latest status of a submission. */
+    async getEfileStatus(submissionId) {
+        return this._invokeFileTax({ action: 'get_status', submissionId });
+    },
+
+    // ─────────────────────────────────────────
     // W-2 SIGNATURES
     // ─────────────────────────────────────────
 
@@ -1052,6 +1117,7 @@ const AeroDB = {
             syncLogs,
             payAdvances,
             filingRecords,
+            taxFilings,
         ] = await Promise.all([
             this.getCompany(),
             this.getEmployees(),
@@ -1067,6 +1133,7 @@ const AeroDB = {
             this.getSyncLogs(),
             this.getPayAdvances(),
             this.getFilingRecords(),
+            this.getTaxFilings(),
         ]);
 
         return {
@@ -1091,6 +1158,7 @@ const AeroDB = {
             syncLogs,
             payAdvances,
             filingRecords,
+            taxFilings,
             garnishments:    [],   // attached per-employee inside getEmployees()
             w2Signatures:    {},   // fetched on-demand via getW2Signature()
             burnRateBudget:  { monthly: 45000 },

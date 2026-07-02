@@ -248,7 +248,8 @@ const DEFAULT_STATE = {
         { id: "onb-002", name: "Priya Nair", email: "p.nair@company.com", role: "Product Manager", department: "Product Design", startDate: "July 15, 2026", status: "pending-docs", step: 1, totalSteps: 5 }
     ],
     burnRateBudget: { monthly: 45000 },
-    splitDeposits: {}
+    splitDeposits: {},
+    taxFilings: []
 };
 
 const AeroApp = {
@@ -1524,6 +1525,97 @@ const AeroApp = {
         } catch (err) {
             this.showToast('Failed to record filing: ' + err.message, 'danger');
         }
+    },
+
+    // Forms that can be transmitted through the connected e-file provider.
+    EFILE_SUPPORTED_FORMS: ['Form 941', 'Form 940', 'W-2 / W-3', '1099-NEC'],
+
+    // Insert/replace a single e-file submission in local state (keyed by form_ref).
+    _setLocalFiling: function(formRef, filing) {
+        if (!this.state.taxFilings) this.state.taxFilings = [];
+        this.state.taxFilings = this.state.taxFilings.filter(f => f.form_ref !== formRef);
+        if (filing) this.state.taxFilings.unshift(filing);
+    },
+
+    /** Transmit a filing to the connected e-file provider. */
+    submitEfile: async function(formRef, formType, period, agency, amount) {
+        if (!window.confirm(
+            `E-file ${formType} for ${period} with ${agency} through your connected provider?\n\n` +
+            `This transmits the filing electronically.`
+        )) return;
+
+        // Optimistic "submitting" state so the row updates immediately.
+        this._setLocalFiling(formRef, { form_ref: formRef, form_type: formType, period, agency, amount, status: 'submitting' });
+        if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+        this.showToast(`Submitting ${formType} (${period})…`, 'info');
+
+        try {
+            const res = await AeroDB.submitEfile({
+                formRef, formType, period, agency, amount,
+                formData: { period, agency, amount },
+            });
+
+            // No provider connected yet — clear the optimistic row and guide the user.
+            if (res && res.configured === false) {
+                this._setLocalFiling(formRef, null);
+                if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+                this.showToast('No e-file provider connected yet. Connect one to transmit filings; you can still use "Mark Filed" for manual submissions.', 'warning');
+                return;
+            }
+
+            const sub = res.submission || {};
+            this._setLocalFiling(formRef, {
+                id:                     res.submissionId || sub.id,
+                form_ref:               formRef,
+                form_type:              formType,
+                period, agency, amount,
+                provider:               sub.provider,
+                provider_submission_id: res.providerSubmissionId,
+                status:                 res.status || 'submitted',
+                status_detail:          res.statusDetail,
+            });
+            if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+
+            if (res.status === 'error') {
+                this.showToast(`E-file failed: ${res.statusDetail || 'provider error'}`, 'danger');
+            } else if (res.status === 'accepted') {
+                this.showToast(`${formType} accepted by ${agency} ✓`, 'success');
+            } else {
+                this.showToast(`${formType} submitted — awaiting ${agency} acknowledgement.`, 'success');
+                if (res.submissionId) this.pollEfileStatus(res.submissionId, formRef);
+            }
+        } catch (err) {
+            this._setLocalFiling(formRef, null);
+            if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+            this.showToast('E-file failed: ' + err.message, 'danger');
+        }
+    },
+
+    /** Poll the provider for a submission's status until it's terminal. */
+    pollEfileStatus: function(submissionId, formRef, attempt = 0) {
+        if (attempt >= 5) return;
+        setTimeout(async () => {
+            try {
+                const res = await AeroDB.getEfileStatus(submissionId);
+                if (!res || res.configured === false) return;
+
+                const existing = (this.state.taxFilings || []).find(f => f.form_ref === formRef) || {};
+                const changed  = existing.status !== res.status;
+                this._setLocalFiling(formRef, { ...existing, status: res.status, status_detail: res.statusDetail });
+
+                if (changed && this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+
+                if (res.status === 'accepted') {
+                    this.showToast(`${existing.form_type || 'Filing'} accepted ✓`, 'success');
+                } else if (res.status === 'rejected') {
+                    this.showToast(`Filing rejected: ${res.statusDetail || 'see provider portal'}`, 'danger');
+                } else {
+                    this.pollEfileStatus(submissionId, formRef, attempt + 1);
+                }
+            } catch (e) {
+                // Stop polling silently on transient errors.
+            }
+        }, 2500);
     },
 
     populateW2Selectors: function() {

@@ -1245,6 +1245,20 @@ function _statusPill(status, filed) {
     return map[status] || '';
 }
 
+// Forms transmittable through the connected e-file provider.
+const EFILE_SUPPORTED_FORMS = new Set(['Form 941', 'Form 940', 'W-2 / W-3', '1099-NEC']);
+
+function _efilePill(status) {
+    const map = {
+        submitting: `<span class="filing-pill transmitting">Transmitting…</span>`,
+        submitted:  `<span class="filing-pill efiled">E-Filed · Pending</span>`,
+        accepted:   `<span class="filing-pill filed">✓ Accepted · E-Filed</span>`,
+        rejected:   `<span class="filing-pill overdue">E-File Rejected</span>`,
+        error:      `<span class="filing-pill overdue">E-File Error</span>`,
+    };
+    return map[status] || '';
+}
+
 function _daysLabel(due, now) {
     const diff = Math.round((due - now) / (1000 * 60 * 60 * 24));
     if (diff < 0)  return `${Math.abs(diff)}d overdue`;
@@ -1267,15 +1281,54 @@ function renderTaxComplianceView(state) {
 
     // Mark which filings are already confirmed filed
     const filedIds = new Set((state.filingRecords || []).map(r => r.form_ref));
+    // Index e-file submissions by the filing-calendar id (form_ref)
+    const efileByRef = new Map((state.taxFilings || []).map(s => [s.form_ref, s]));
 
     function renderFilingRow(f) {
-        const isFiled   = filedIds.has(f.id);
-        const dueStr    = f.due.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const efile     = efileByRef.get(f.id);
+        const efileDone = efile && efile.status === 'accepted';
+        const isFiled   = filedIds.has(f.id) || efileDone;
         const daysLeft  = _daysLabel(f.due, now);
-        const pill      = _statusPill(f.status, isFiled);
+        const pill      = efile ? _efilePill(efile.status) : _statusPill(f.status, isFiled);
         const amtStr    = f.amount > 0 ? formatCurrency(f.amount) : '—';
         const rowBorder = f.status === 'overdue' && !isFiled ? 'border-left: 3px solid var(--danger);' :
                           f.status === 'pending'  && !isFiled ? 'border-left: 3px solid var(--warning);' : '';
+        const canEfile  = EFILE_SUPPORTED_FORMS.has(f.form);
+        const efileArgs = `'${f.id}', '${f.form}', '${f.period}', '${f.agency}', ${f.amount}`;
+
+        // Determine the action cluster based on filing / e-file state.
+        let actions;
+        if (efileDone) {
+            actions = `<span style="font-size:12px; color:var(--success); font-weight:600;">✓ Accepted · E-Filed via ${efile.provider || 'provider'}</span>`;
+        } else if (efile && (efile.status === 'submitting' || efile.status === 'submitted')) {
+            actions = `<span style="font-size:12px; color:var(--primary); font-weight:600; white-space:nowrap;">
+                ${efile.status === 'submitting' ? 'Transmitting…' : 'E-Filed — awaiting acknowledgement'}</span>`;
+        } else if (isFiled) {
+            actions = `<span style="font-size:12px; color:var(--success); font-weight:600;">✓ Confirmed Filed</span>`;
+        } else {
+            const retry = efile && (efile.status === 'rejected' || efile.status === 'error');
+            actions = `
+                ${canEfile ? `
+                <button class="btn btn-primary" style="font-size:12px; padding:6px 12px; white-space:nowrap;"
+                    onclick="AeroApp.submitEfile(${efileArgs})">
+                    ${retry ? 'Retry E-File' : 'E-File'} ↑
+                </button>` : ''}
+                <a href="${f.portalUrl}" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
+                    ${f.portalName} ↗
+                </a>
+                <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px; white-space:nowrap;"
+                    onclick="AeroApp.markFiled('${f.id}', '${f.form}', '${f.period}', '${f.agency}', ${f.amount})">
+                    Mark Filed ✓
+                </button>`;
+        }
+
+        // Meta line: show e-file rejection/error detail when present.
+        const metaStatus = efile
+            ? (efile.status === 'rejected' || efile.status === 'error'
+                ? `<span style="color:var(--danger);">${efile.status_detail || 'E-file failed'}</span>`
+                : `<span style="color:var(--primary);">${efile.provider || 'E-file provider'}</span>`)
+            : `<span style="color:${f.status === 'overdue' && !isFiled ? 'var(--danger)' : f.status === 'pending' && !isFiled ? 'var(--warning)' : 'var(--text-tertiary)'};">${isFiled ? 'Filed' : daysLeft}</span>`;
+
         return `
         <div class="filing-row" style="${rowBorder}">
             <div class="filing-row-main">
@@ -1290,22 +1343,12 @@ function renderTaxComplianceView(state) {
                         <span>·</span>
                         <span>${f.period}</span>
                         <span>·</span>
-                        <span style="color:${f.status === 'overdue' && !isFiled ? 'var(--danger)' : f.status === 'pending' && !isFiled ? 'var(--warning)' : 'var(--text-tertiary)'};">${isFiled ? 'Filed' : daysLeft}</span>
+                        ${metaStatus}
                         ${f.amount > 0 ? `<span>·</span><span style="font-weight:600;color:var(--text-primary);">${amtStr}</span>` : ''}
                     </div>
                 </div>
                 <div class="filing-row-actions">
-                    ${!isFiled ? `
-                    <a href="${f.portalUrl}" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px; padding:6px 12px; white-space:nowrap;">
-                        ${f.portalName} ↗
-                    </a>
-                    <button class="btn btn-secondary" style="font-size:12px; padding:6px 12px; white-space:nowrap;"
-                        onclick="AeroApp.markFiled('${f.id}', '${f.form}', '${f.period}', '${f.agency}', ${f.amount})">
-                        Mark Filed ✓
-                    </button>
-                    ` : `
-                    <span style="font-size:12px; color:var(--success); font-weight:600;">✓ Confirmed Filed</span>
-                    `}
+                    ${actions}
                 </div>
             </div>
         </div>`;
@@ -1365,7 +1408,7 @@ function renderTaxComplianceView(state) {
             <div style="padding:16px 20px; border-bottom:1px solid var(--border-color);">
                 <div class="section-title" style="margin:0;">Federal Tax Filings — ${new Date().getFullYear()}</div>
                 <p style="font-size:12px; color:var(--text-tertiary); margin-top:4px;">
-                    Click any portal link to open the payment page. Mark as Filed once submitted.
+                    E-File to transmit electronically through your connected provider, or use a portal link and Mark as Filed for manual submissions.
                 </p>
             </div>
             <div class="filing-list">
