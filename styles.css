@@ -1781,10 +1781,12 @@ body.employee-mode .admin-only {
     text-transform: uppercase;
     letter-spacing: 0.3px;
 }
-.filing-pill.overdue  { background: var(--danger-light);  color: var(--danger);  }
-.filing-pill.pending  { background: var(--warning-light); color: var(--warning); }
-.filing-pill.upcoming { background: var(--success-light); color: var(--success); }
-.filing-pill.filed    { background: var(--success-light); color: var(--success); }
+.filing-pill.overdue     { background: var(--danger-light);  color: var(--danger);  }
+.filing-pill.pending     { background: var(--warning-light); color: var(--warning); }
+.filing-pill.upcoming    { background: var(--success-light); color: var(--success); }
+.filing-pill.filed       { background: var(--success-light); color: var(--success); }
+.filing-pill.transmitting{ background: var(--primary-light, rgba(99,102,241,0.15)); color: var(--primary); }
+.filing-pill.efiled      { background: var(--primary-light, rgba(99,102,241,0.15)); color: var(--primary); }
 
 .filing-form-row {
     display: flex;

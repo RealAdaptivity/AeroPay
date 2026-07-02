@@ -1,5 +1,5 @@
 /**
- * AeroPay Payroll Engine
+ * GlidePay Payroll Engine
  * Handles exact federal, state, and FICA payroll calculations.
  * Reflects standard IRS Publication 15-T percentage method withholding tables and progressive state taxes.
  */

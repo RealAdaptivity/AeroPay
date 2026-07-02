@@ -1,4 +1,4 @@
-# AeroPay — Sandbox Testing Guide
+# GlidePay — Sandbox Testing Guide
 ### Full end-to-end test of the Treasury ACH payroll disbursement flow
 
 ---
@@ -127,7 +127,7 @@ Copy the signing secret → `supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_�
    - Address: any US address
    - Owner DOB: `01/01/1901` (Stripe test bypass)
    - Owner SSN last 4: `0000`
-4. Submit → you'll be redirected back to AeroPay with `?connect=return`
+4. Submit → you'll be redirected back to GlidePay with `?connect=return`
 5. The `account.updated` webhook will fire; within ~30 seconds the status card should show **Active** and a Financial Account ID will appear
 
 > If the webhook doesn't fire within 1 minute, trigger it manually:
