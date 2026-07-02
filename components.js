@@ -2311,7 +2311,7 @@ function renderLandingPageView(state) {
                             <div style="display:flex;flex-direction:column;gap:14px;margin-top:16px;">
                                 <div class="form-group" style="margin:0;"><label class="login-label">Company Legal Name</label><input type="text" class="form-control" id="regCompanyName" placeholder="Acme Corp LLC" required></div>
                                 <div class="form-group" style="margin:0;"><label class="login-label">EIN / Tax ID <span style="color:var(--text-tertiary);font-weight:400;">(optional)</span></label><input type="text" class="form-control" id="regEIN" placeholder="XX-XXXXXXX"></div>
-                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to AeroPay's <a href="#" style="color:var(--primary);">Terms of Service</a> and <a href="#" style="color:var(--primary);">Privacy Policy</a></span></label>
+                                <label class="login-tos-row"><input type="checkbox" id="regTOS" required><span>I agree to AeroPay's <a href="#" style="color:var(--primary);">Terms of Service</a> and <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);">Privacy Policy</a></span></label>
                             </div>
                             <div style="display:flex;gap:10px;margin-top:20px;">
                                 <button type="button" class="btn btn-secondary" style="flex:0 0 auto;" onclick="AeroApp.regPrevStep()">← Back</button>
@@ -2455,6 +2455,137 @@ function renderLandingPageView(state) {
                     </table>
                 </div>
             </section>
+        </div>
+    `;
+}
+
+// 11b. Render Privacy Policy (public, standalone page)
+function renderPrivacyPolicyView(state) {
+    const lastUpdated = "July 2, 2026";
+    return `
+        <div class="landing-page">
+            <header class="landing-header">
+                <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
+                    <div class="logo-box">A</div>
+                    <div class="logo-text">AeroPay</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <button class="btn btn-outline" onclick="AeroApp.navigateTo('landing')" style="display:inline-flex;align-items:center;gap:6px;">
+                        <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        Back
+                    </button>
+                    <button class="btn-icon-only theme-toggle-landing" onclick="AeroApp.toggleTheme()" title="Toggle Light/Dark Theme" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
+                        <svg style="width:20px;height:20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    </button>
+                </div>
+            </header>
+
+            <main class="legal-page-container">
+                <div class="legal-doc card">
+                    <span class="landing-badge">Legal</span>
+                    <h1 class="legal-title">Privacy Policy</h1>
+                    <p class="legal-updated">Last updated: ${lastUpdated}</p>
+
+                    <p class="legal-intro">
+                        AeroPay ("AeroPay," "we," "us," or "our") provides an automated payroll, tax
+                        compliance, and workforce management platform. This Privacy Policy explains how we
+                        collect, use, disclose, and safeguard information when you use our website,
+                        applications, and related services (collectively, the "Services"). Because payroll
+                        inherently involves sensitive personal and financial data, we treat the protection
+                        of this information as a core responsibility.
+                    </p>
+
+                    <h2 class="legal-heading">1. Information We Collect</h2>
+                    <p>We collect information in the following categories:</p>
+                    <ul class="legal-list">
+                        <li><strong>Account &amp; company data:</strong> Your name, work email, password, company legal name, and Employer Identification Number (EIN) / Tax ID provided during registration and setup.</li>
+                        <li><strong>Employee &amp; contractor data:</strong> Names, contact details, worker classification (W-2 / 1099), compensation rates, tax withholding elections, and state tax residency that administrators enter to run payroll.</li>
+                        <li><strong>Sensitive financial &amp; identity data:</strong> Bank account and routing numbers, Social Security Numbers or Tax IDs, and tax documents (e.g., Form W-2, Form 941) required to process direct deposits and file taxes.</li>
+                        <li><strong>Usage &amp; log data:</strong> Time-tracking entries, PTO and benefits selections, audit-log activity, device and browser information, and IP addresses.</li>
+                        <li><strong>Payments data:</strong> Billing and subscription information processed through our payment provider.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">2. How We Use Your Information</h2>
+                    <ul class="legal-list">
+                        <li>To provide, operate, and maintain the Services, including running payroll, calculating and filing taxes, and settling direct deposits.</li>
+                        <li>To authenticate users, manage accounts, and enforce role-based access (administrator vs. employee).</li>
+                        <li>To generate tax filings and compliance documents in all 50 states.</li>
+                        <li>To provide customer support and communicate service, security, and account notices.</li>
+                        <li>To detect, investigate, and prevent fraud, unauthorized access, and other misuse.</li>
+                        <li>To comply with legal, regulatory, tax, and audit obligations.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">3. How We Share Information</h2>
+                    <p>We do not sell your personal information. We share information only as needed to operate the Services, including with:</p>
+                    <ul class="legal-list">
+                        <li><strong>Government &amp; tax authorities</strong> (e.g., the IRS and state agencies) to file required payroll tax returns.</li>
+                        <li><strong>Financial institutions and ACH networks</strong> to process direct deposits and settlements.</li>
+                        <li><strong>Service providers &amp; sub-processors</strong> (such as cloud hosting, database, and payment providers) who process data on our behalf under contractual confidentiality and security obligations.</li>
+                        <li><strong>Accounting integrations</strong> (e.g., QuickBooks Online or Xero) only when you connect them.</li>
+                        <li><strong>Legal or safety recipients</strong> when required by law, subpoena, or to protect rights, property, or safety.</li>
+                    </ul>
+
+                    <h2 class="legal-heading">4. Data Security</h2>
+                    <p>
+                        We use industry-standard safeguards to protect your data, including encryption in
+                        transit (256-bit SSL/TLS), encryption at rest for sensitive fields, role-based
+                        access controls, and audit logging. We maintain administrative, technical, and
+                        physical controls aligned with SOC 2 principles. No method of transmission or
+                        storage is completely secure, but we continually work to protect your information.
+                    </p>
+
+                    <h2 class="legal-heading">5. Data Retention</h2>
+                    <p>
+                        We retain payroll, tax, and employment records for as long as your account is active
+                        and for the periods required by applicable tax and employment law (often several
+                        years after a transaction). When data is no longer required, we securely delete or
+                        anonymize it.
+                    </p>
+
+                    <h2 class="legal-heading">6. Your Rights &amp; Choices</h2>
+                    <p>
+                        Depending on your jurisdiction, you may have the right to access, correct, export,
+                        or request deletion of your personal information, and to object to or restrict
+                        certain processing. Employees should direct requests to their employer (the account
+                        administrator), who controls the payroll data. You may also contact us directly
+                        using the details below. Note that we may be legally required to retain certain
+                        payroll and tax records even after a deletion request.
+                    </p>
+
+                    <h2 class="legal-heading">7. Cookies &amp; Tracking</h2>
+                    <p>
+                        We use cookies and similar technologies to keep you signed in, remember preferences
+                        (such as light/dark theme), and understand how the Services are used. You can control
+                        cookies through your browser settings, though some features may not function properly
+                        without them.
+                    </p>
+
+                    <h2 class="legal-heading">8. Children's Privacy</h2>
+                    <p>
+                        The Services are intended for use by businesses and their workers and are not
+                        directed to children under 16. We do not knowingly collect personal information from
+                        children.
+                    </p>
+
+                    <h2 class="legal-heading">9. Changes to This Policy</h2>
+                    <p>
+                        We may update this Privacy Policy from time to time. When we make material changes,
+                        we will update the "Last updated" date above and, where appropriate, provide
+                        additional notice. Your continued use of the Services after changes take effect
+                        constitutes acceptance of the revised policy.
+                    </p>
+
+                    <h2 class="legal-heading">10. Contact Us</h2>
+                    <p>
+                        If you have questions about this Privacy Policy or how we handle your data, contact
+                        our privacy team at <a href="mailto:privacy@aeropay.com" style="color:var(--primary);">privacy@aeropay.com</a>.
+                    </p>
+
+                    <div class="legal-footer-actions">
+                        <button class="btn btn-primary" onclick="AeroApp.navigateTo('landing')">← Return to AeroPay</button>
+                    </div>
+                </div>
+            </main>
         </div>
     `;
 }
