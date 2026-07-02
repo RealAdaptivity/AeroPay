@@ -1,0 +1,25 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GlidePay logo">
+  <defs>
+    <linearGradient id="glideGradient" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="glideSheen" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded gradient tile (squircle) -->
+  <rect x="0" y="0" width="512" height="512" rx="118" fill="url(#glideGradient)"/>
+  <rect x="0" y="0" width="512" height="512" rx="118" fill="url(#glideSheen)"/>
+
+  <!-- Geometric "G": an open ring with the G's tongue/crossbar -->
+  <g stroke="#ffffff" stroke-width="46" stroke-linecap="round" fill="none">
+    <!-- Open ring (gap on the lower-right, like a C) -->
+    <path d="M 336 176
+             A 112 112 0 1 0 356 300"/>
+    <!-- Tongue / crossbar of the G -->
+    <path d="M 356 300 L 268 300"/>
+  </g>
+</svg>
