@@ -1457,23 +1457,25 @@ function renderTaxComplianceView(state) {
                 <div class="filing-form-row">
                     <div>
                         <div style="font-weight:600;">Form W-2 — Wage & Tax Statement</div>
-                        <div style="font-size:12px; color:var(--text-tertiary);">Annual statement for W-2 employees. Due Jan 31. File Copy A with SSA.</div>
+                        <div style="font-size:12px; color:var(--text-tertiary);">Annual statement for W-2 employees. Due Jan 31. File Copy A with SSA — <strong>free</strong> via the EFW2 file below.</div>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                         <select class="form-control" style="width:150px; font-size:12px;" id="w2EmployeeSelect"></select>
-                        <a href="https://www.ssa.gov/employer/businessservices.htm" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px;">SSA Business Services ↗</a>
                         <button class="btn btn-primary" style="font-size:12px;" onclick="AeroApp.generateW2()">Preview W-2</button>
+                        <button class="btn btn-secondary" style="font-size:12px;" onclick="AeroApp.downloadEFW2()">Download EFW2 e-file ↓</button>
+                        <a href="https://www.ssa.gov/employer/businessservices.htm" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px;">Upload free at SSA BSO ↗</a>
                     </div>
                 </div>
                 <div class="filing-form-row">
                     <div>
                         <div style="font-weight:600;">Form 1099-NEC — Nonemployee Compensation</div>
-                        <div style="font-size:12px; color:var(--text-tertiary);">Annual form for contractors paid $600+. Due Jan 31. File via IRS FIRE.</div>
+                        <div style="font-size:12px; color:var(--text-tertiary);">Annual form for contractors paid $600+. Due Jan 31. File <strong>free</strong> via the IRS IRIS CSV below (a free IRIS TCC is required).</div>
                     </div>
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                         <select class="form-control" style="width:150px; font-size:12px;" id="necContractorSelect"></select>
-                        <a href="https://fire.irs.gov" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px;">IRS FIRE System ↗</a>
                         <button class="btn btn-primary" style="font-size:12px;" onclick="AeroApp.generate1099()">Preview 1099-NEC</button>
+                        <button class="btn btn-secondary" style="font-size:12px;" onclick="AeroApp.download1099CSV()">Download IRIS CSV ↓</button>
+                        <a href="https://www.irs.gov/filing/e-file-information-returns-with-iris" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:12px;">Upload free at IRS IRIS ↗</a>
                     </div>
                 </div>
                 <div class="filing-form-row">

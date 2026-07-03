@@ -1677,6 +1677,55 @@ const AeroApp = {
         this.openModal(`IRS Form 1099-NEC: ${emp.name}`, necHTML, true);
     },
 
+    // --- Free e-file exports (SSA EFW2 / IRS IRIS) ---
+
+    _downloadTextFile: function(filename, text, mime = 'text/plain') {
+        const blob = new Blob([text], { type: mime });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+
+    // Warn (but don't block) when required PII is missing; return the summary.
+    _efileReadiness: function(type) {
+        const r = checkEfileReadiness(this.state, type);
+        if (r.count === 0) {
+            this.showToast(`No ${type === 'w2' ? 'W-2 employees' : '1099 contractors'} to file.`, 'warning');
+            return null;
+        }
+        if (!r.ready) {
+            const missingEmps = r.employees.filter(e => e.missing.length);
+            const bits = [];
+            if (r.employerMissing.length) bits.push(`employer: ${r.employerMissing.join(', ')}`);
+            if (missingEmps.length) bits.push(`${missingEmps.length} of ${r.count} recipients missing SSN/address`);
+            this.showToast(`Heads up — file is incomplete (${bits.join('; ')}). Add the missing details before filing; downloading a draft for review.`, 'warning');
+        }
+        return r;
+    },
+
+    downloadEFW2: function() {
+        const r = this._efileReadiness('w2');
+        if (!r) return;
+        const year = new Date().getFullYear();
+        const file = generateEFW2(this.state, year);
+        this._downloadTextFile(`W2_EFW2_${year}.txt`, file);
+        if (r.ready) this.showToast('EFW2 file generated. Validate with SSA AccuWage, then upload free at SSA BSO.', 'success');
+    },
+
+    download1099CSV: function() {
+        const r = this._efileReadiness('nec');
+        if (!r) return;
+        const year = new Date().getFullYear();
+        const file = generate1099IRISCSV(this.state, year);
+        this._downloadTextFile(`1099NEC_IRIS_${year}.csv`, file, 'text/csv');
+        if (r.ready) this.showToast('IRIS CSV generated. Upload free at the IRS IRIS portal (TCC required).', 'success');
+    },
+
 
     // --- Accounting Integrations Handlers ---
     toggleIntegration: async function(name) {
