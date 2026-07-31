@@ -8,8 +8,9 @@
  *
  * To force sandbox on any host: add ?sandbox=1 to the URL, or set
  *   localStorage.setItem('aeropay_env', 'sandbox')
- * To force live:
+ * To force live (only after LIVE keys/prices are filled):
  *   localStorage.setItem('aeropay_env', 'live')
+ * Placeholder LIVE prices always fall back to SANDBOX (forced live is cleared).
  */
 
 const AeroConfig = (() => {
@@ -67,20 +68,15 @@ const AeroConfig = (() => {
             : isSandboxHost          ? "sandbox"
             : "live";
 
-    // Production host with unfinished live Stripe config → use sandbox so
-    // "Start Free Trial" / Checkout actually works during go-live prep.
-    if (env === "live" && isPlaceholder(LIVE) && override !== "live") {
+    // Never send placeholder LIVE price IDs to Stripe — even if aeropay_env=live.
+    // Until real live keys/prices are filled in config.js, always use SANDBOX.
+    if (env === "live" && isPlaceholder(LIVE)) {
         console.warn(
-            "[GlidePay] Live Stripe keys/prices are still placeholders — falling back to SANDBOX. " +
-            "Set live keys in config.js, or force with localStorage aeropay_env=live."
+            "[GlidePay] Live Stripe keys/prices are still placeholders — using SANDBOX. " +
+            "Fill LIVE in config.js for real charges. Clear localStorage aeropay_env if you forced live."
         );
         env = "sandbox";
-    }
-
-    if (env === "live" && isPlaceholder(LIVE) && override === "live") {
-        console.error(
-            "[GlidePay] Forced LIVE mode but price/key placeholders are still set. Checkout will fail."
-        );
+        try { localStorage.removeItem("aeropay_env"); } catch (_) { /* private mode */ }
     }
 
     const cfg = env === "sandbox" ? SANDBOX : LIVE;
