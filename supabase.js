@@ -255,7 +255,34 @@ const AeroDB = {
     // COMPANY
     // ─────────────────────────────────────────
 
-    /** Fetch the company record for the logged-in user. */
+    _mapCompanyRow(data) {
+        return {
+            id:                       data.id,
+            name:                     data.name,
+            ein:                      data.ein,
+            bankName:                 data.bank_name,
+            routingNumber:            data.routing_number,
+            accountNumber:            data.account_number,
+            paymentType:              data.payment_type,
+            setupComplete:            !!data.setup_complete,
+            setupStep:                data.setup_step || 1,
+            stripeAccountId:          data.stripe_account_id          || '',
+            stripeAccountStatus:      data.stripe_account_status       || 'not_created',
+            stripeFinancialAccountId: data.stripe_financial_account_id || '',
+            autopilot: {
+                enabled:             !!data.auto_payroll_enabled,
+                mode:                data.auto_payroll_mode || 'reminder',
+                frequency:           data.auto_payroll_frequency || 'biweekly',
+                dayOfWeek:           data.auto_payroll_day_of_week ?? 5,
+                dayOfMonth:          data.auto_payroll_day_of_month ?? 1,
+                nextRun:             data.auto_payroll_next_run || null,
+                lastRun:             data.auto_payroll_last_run || null,
+                reminderDaysBefore:  data.auto_payroll_reminder_days_before ?? 2,
+            },
+        };
+    },
+
+    /** Fetch the company record for the logged-in owner, admin, or invited employee. */
     async getCompany() {
         const user = await this.getUser();
         if (!user) throw new Error('getCompany: not signed in');
@@ -264,36 +291,24 @@ const AeroDB = {
         // when auth fires SIGNED_IN before company rows exist.
         let lastErr;
         for (let attempt = 0; attempt < 8; attempt++) {
-            const result = await _sb.from('companies').select('*').eq('owner_id', user.id).maybeSingle();
-            if (result.error) {
-                lastErr = result.error;
-            } else if (result.data) {
-                const data = result.data;
-                return {
-                    id:                       data.id,
-                    name:                     data.name,
-                    ein:                      data.ein,
-                    bankName:                 data.bank_name,
-                    routingNumber:            data.routing_number,
-                    accountNumber:            data.account_number,
-                    paymentType:              data.payment_type,
-                    setupComplete:            !!data.setup_complete,
-                    setupStep:                data.setup_step || 1,
-                    stripeAccountId:          data.stripe_account_id          || '',
-                    stripeAccountStatus:      data.stripe_account_status       || 'not_created',
-                    stripeFinancialAccountId: data.stripe_financial_account_id || '',
-                    autopilot: {
-                        enabled:             !!data.auto_payroll_enabled,
-                        mode:                data.auto_payroll_mode || 'reminder',
-                        frequency:           data.auto_payroll_frequency || 'biweekly',
-                        dayOfWeek:           data.auto_payroll_day_of_week ?? 5,
-                        dayOfMonth:          data.auto_payroll_day_of_month ?? 1,
-                        nextRun:             data.auto_payroll_next_run || null,
-                        lastRun:             data.auto_payroll_last_run || null,
-                        reminderDaysBefore:  data.auto_payroll_reminder_days_before ?? 2,
-                    },
-                };
+            // 1) Company owner
+            const owned = await _sb.from('companies').select('*').eq('owner_id', user.id).maybeSingle();
+            if (owned.error) lastErr = owned.error;
+            else if (owned.data) return this._mapCompanyRow(owned.data);
+
+            // 2) Invited employee (or any member) via RLS current_company_id()
+            const member = await _sb.from('companies').select('*').maybeSingle();
+            if (member.error) lastErr = member.error;
+            else if (member.data) return this._mapCompanyRow(member.data);
+
+            // 3) Explicit employee → company_id lookup, then company row
+            const emp = await _sb.from('employees').select('company_id').eq('user_id', user.id).maybeSingle();
+            if (emp.data?.company_id) {
+                const byId = await _sb.from('companies').select('*').eq('id', emp.data.company_id).maybeSingle();
+                if (byId.error) lastErr = byId.error;
+                else if (byId.data) return this._mapCompanyRow(byId.data);
             }
+
             await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
         }
         throw new Error(`getCompany: ${lastErr?.message || 'company not found for this account'}`);
@@ -1288,8 +1303,26 @@ const AeroDB = {
      * so the existing render functions work without modification.
      */
     async loadFullState() {
+        const user = await this.getUser();
+        const company = await this.getCompany();
+
+        // Invited employees only see their own employee row; keep admin-only lists empty.
+        const { data: selfEmp } = await _sb
+            .from('employees')
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+        const isEmployeePortal = !!selfEmp;
+
+        const soft = async (fn, fallback) => {
+            try { return await fn(); }
+            catch (err) {
+                console.warn('[AeroDB] loadFullState soft-fail:', err.message || err);
+                return fallback;
+            }
+        };
+
         const [
-            company,
             employees,
             payrollHistory,
             timesheetMap,
@@ -1304,27 +1337,23 @@ const AeroDB = {
             payAdvances,
             filingRecords,
             taxFilings,
-            user,
         ] = await Promise.all([
-            this.getCompany(),
-            this.getEmployees(),
-            this.getPayrollHistory(),
-            this.getAllTimesheets(),
-            this.getPTOBalances(),
-            this.getPTORequests(),
-            this.getBenefits(),
-            this.getAnnouncements(),
-            this.getAuditLog(),
-            this.getOnboardingQueue(),
-            this.getIntegrations(),
-            this.getSyncLogs(),
-            this.getPayAdvances(),
-            this.getFilingRecords(),
-            this.getTaxFilings(),
-            this.getUser(),
+            soft(() => this.getEmployees(), []),
+            soft(() => this.getPayrollHistory(), []),
+            soft(() => this.getAllTimesheets(), {}),
+            soft(() => this.getPTOBalances(), {}),
+            soft(() => this.getPTORequests(), []),
+            soft(() => this.getBenefits(), {}),
+            soft(() => this.getAnnouncements(), []),
+            isEmployeePortal ? Promise.resolve([]) : soft(() => this.getAuditLog(), []),
+            isEmployeePortal ? Promise.resolve([]) : soft(() => this.getOnboardingQueue(), []),
+            isEmployeePortal ? Promise.resolve({ quickbooks: false, xero: false }) : soft(() => this.getIntegrations(), { quickbooks: false, xero: false }),
+            isEmployeePortal ? Promise.resolve([]) : soft(() => this.getSyncLogs(), []),
+            soft(() => this.getPayAdvances(), []),
+            isEmployeePortal ? Promise.resolve({}) : soft(() => this.getFilingRecords(), {}),
+            isEmployeePortal ? Promise.resolve([]) : soft(() => this.getTaxFilings(), []),
         ]);
 
-        // Resolve actor labels for Approvals (current user email when they submitted/approved)
         const userIdToLabel = {};
         if (user?.id) userIdToLabel[user.id] = user.email || 'Admin';
 
@@ -1354,7 +1383,7 @@ const AeroDB = {
             },
             employees,
             payrollHistory,
-            payrollApprovals: _runsToApprovals(payrollHistory, userIdToLabel),
+            payrollApprovals: isEmployeePortal ? [] : _runsToApprovals(payrollHistory, userIdToLabel),
             timesheets:      timesheetMap,
             ptoBalances,
             ptoRequests,
@@ -1367,11 +1396,33 @@ const AeroDB = {
             payAdvances:     payAdvances || [],
             filingRecords,
             taxFilings,
-            garnishments:    [],   // attached per-employee inside getEmployees()
-            w2Signatures:    {},   // fetched on-demand via getW2Signature()
+            garnishments:    [],
+            w2Signatures:    {},
             burnRateBudget:  { monthly: 45000 },
             splitDeposits:   {},
         };
+    },
+
+    /** Admin: invite an employee to the Employee Portal (Auth user + link user_id). */
+    async inviteEmployeeToPortal(employeeId) {
+        const session = await _sb.auth.getSession();
+        const token = session.data?.session?.access_token;
+        if (!token) throw new Error('Not signed in');
+
+        const url = (typeof AeroConfig !== 'undefined' && AeroConfig.inviteEmployeeFunctionUrl)
+            || `${SUPABASE_URL}/functions/v1/invite-employee`;
+
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action: 'invite', employeeId }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Invite failed');
+        return data;
     },
 };
 

@@ -751,6 +751,7 @@ function renderEmployeesView(state) {
                             <th>Compensation</th>
                             <th>Benefits & Deductions</th>
                             <th>Allowances</th>
+                            <th>Portal</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -758,6 +759,7 @@ function renderEmployeesView(state) {
                         ${state.employees.map(emp => {
                             const is1099 = emp.classification === '1099';
                             const benefits = emp.benefits || { rate401k: 0, medicalPremium: 0, reimbursement: 0 };
+                            const portalLinked = !!emp.userId;
                             return `
                             <tr data-classification="${is1099 ? '1099' : 'w2'}">
                                 <td>
@@ -789,6 +791,18 @@ function renderEmployeesView(state) {
                                 <td>
                                     <div style="font-size:12px; font-weight:600; color:var(--success);">${formatCurrency(benefits.reimbursement)}</div>
                                     <div style="font-size:10px; color:var(--text-secondary);">Tax-free Reimbursement</div>
+                                </td>
+                                <td>
+                                    <span class="badge ${portalLinked ? 'badge-success' : 'badge-warning'}" style="font-size:10px;">
+                                        ${portalLinked ? 'Portal linked' : 'Not invited'}
+                                    </span>
+                                    <div style="margin-top:6px;">
+                                        <button class="btn btn-outline" style="padding:4px 8px;font-size:11px;"
+                                            onclick="AeroApp.inviteEmployeeToPortal('${emp.id}')"
+                                            title="${portalLinked ? 'Resend portal sign-in link' : 'Invite to Employee Portal'}">
+                                            ${portalLinked ? 'Resend link' : 'Invite to Portal'}
+                                        </button>
+                                    </div>
                                 </td>
                                 <td>
                                     <div class="action-buttons">
@@ -4594,6 +4608,7 @@ function renderHelpDocsView(state) {
                     <li>W-2 vs 1099 classification drives tax withholding and forms.</li>
                     <li>Set pay type (hourly/salaried), frequency, state, and benefits on each profile.</li>
                     <li>Onboarding tracks new-hire steps and document collection.</li>
+                    <li>Use <strong>Invite to Portal</strong> on an employee to email a sign-in link and enable My Dashboard / time / pay stubs.</li>
                     <li>Garnishments and pay advances are managed from employee records / Approvals.</li>
                 </ul>`
         },

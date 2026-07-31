@@ -35,6 +35,7 @@ const AeroConfig = (() => {
         achFunctionUrl:       "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach",
         connectFunctionUrl:   "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-connect",
         fileTaxFunctionUrl:   "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/file-tax",
+        inviteEmployeeFunctionUrl: "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/invite-employee",
     };
 
     // ── Live config ───────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ const AeroConfig = (() => {
         achFunctionUrl:       "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-ach",
         connectFunctionUrl:   "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-connect",
         fileTaxFunctionUrl:   "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/file-tax",
+        inviteEmployeeFunctionUrl: "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/invite-employee",
     };
 
     const isPlaceholder = (cfg) =>

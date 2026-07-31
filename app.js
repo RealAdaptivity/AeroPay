@@ -1196,6 +1196,53 @@ const AeroApp = {
         }
     },
 
+    /**
+     * Invite (or re-invite) an employee to the Employee Portal.
+     * Creates/links a Supabase Auth user and sets employees.user_id.
+     */
+    inviteEmployeeToPortal: async function(id) {
+        const emp = this.state.employees.find(e => e.id === id);
+        if (!emp) return;
+        if (!emp.email) return this.showToast('Add an email on the employee record first.', 'warning');
+
+        this.showToast(`Inviting ${emp.name}…`, 'info');
+        try {
+            const result = await AeroDB.inviteEmployeeToPortal(id);
+            emp.userId = result.userId || emp.userId;
+
+            const linkHtml = result.inviteLink
+                ? `<p style="font-size:12px;color:var(--text-secondary);margin:12px 0 0;word-break:break-all;">
+                     Shareable sign-in link:<br>
+                     <a href="${result.inviteLink}" target="_blank" rel="noopener" style="color:var(--primary);">${result.inviteLink}</a>
+                   </p>
+                   <button type="button" class="btn btn-outline" style="margin-top:10px;"
+                     onclick="navigator.clipboard.writeText(${JSON.stringify(result.inviteLink)}).then(()=>AeroApp.showToast('Link copied','success'))">
+                     Copy link
+                   </button>`
+                : '';
+
+            this.openModal(
+                'Employee Portal Invite',
+                `<div style="font-size:14px;line-height:1.55;">
+                    <p style="margin:0 0 8px;"><strong>${emp.name}</strong> · ${emp.email}</p>
+                    <p style="margin:0;color:var(--text-secondary);">${result.message || 'Invite sent.'}</p>
+                    <p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary);">
+                      They should open the invite email (or the link below), set a password if prompted,
+                      then sign in on glidepay.org using the <strong>Employee</strong> tab.
+                    </p>
+                    ${linkHtml}
+                 </div>
+                 <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+                    <button type="button" class="btn btn-primary" onclick="AeroApp.closeModal();AeroApp.navigateTo('employees')">Done</button>
+                 </div>`,
+                true
+            );
+            this.navigateTo('employees');
+        } catch (err) {
+            console.error('[AeroApp] inviteEmployeeToPortal:', err);
+            this.showToast('Invite failed: ' + (err.message || String(err)), 'danger');
+        }
+    },
 
     // --- Time Tracking Handlers ---
     populateTimesheetEmployeeSelect: function() {
