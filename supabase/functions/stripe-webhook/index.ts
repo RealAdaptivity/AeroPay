@@ -315,8 +315,9 @@ async function handleAccountUpdated(account: Stripe.Account) {
                         features: {
                             inbound_transfers:   { ach: { requested: true } },
                             outbound_transfers:  { ach: { requested: true } },
-                            outbound_payments:   { us_bank_account: { requested: true } },
+                            outbound_payments:   { ach: { requested: true } },
                             financial_addresses: { aba: { requested: true } },
+                            intra_stripe_flows:  { requested: true },
                         },
                     },
                     { stripeAccount: account.id },
