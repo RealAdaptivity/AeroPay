@@ -315,8 +315,8 @@ const AeroApp = {
             if (typeof AeroBilling !== 'undefined') {
                 AeroBilling.renderBillingBanner();
                 AeroBilling.handleCheckoutReturn();
-                this._handleConnectReturn();
             }
+            await this._handleConnectReturn();
         } catch (err) {
             console.error('[AeroApp] Failed to load state:', err);
             this.showToast('Failed to load company data. Please refresh.', 'danger');
@@ -334,18 +334,80 @@ const AeroApp = {
 
     saveStateToStorage: function() {}, // no-op — all persistence via AeroDB
 
-    _handleConnectReturn: function() {
+    _handleConnectReturn: async function() {
         const params = new URLSearchParams(window.location.search);
         const connect = params.get('connect');
         if (!connect) return;
-        window.history.replaceState({}, '', window.location.pathname);
+        window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         if (connect === 'return') {
-            this.showToast('Stripe onboarding submitted! Capability verification may take a few minutes.', 'success');
-            setTimeout(() => this._refreshState(), 4000);
+            this.showToast('Syncing Stripe onboarding status…', 'info');
+            try {
+                await this.syncConnectStatus({ navigate: true });
+            } catch (err) {
+                console.error('[Connect] sync after return failed:', err);
+                await this._refreshState();
+                this.navigateTo('settings');
+                this.showToast('Returned from Stripe — open Settings to refresh status.', 'warning');
+            }
         } else if (connect === 'refresh') {
             this.showToast('Onboarding link expired — restarting.', 'info');
             this.startConnectOnboarding();
         }
+    },
+
+    /**
+     * Pull live Connect status from Stripe (via stripe-connect get_status),
+     * update local settings, and optionally jump to Settings.
+     */
+    syncConnectStatus: async function({ navigate = false } = {}) {
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) throw new Error('Not signed in');
+
+        const resp = await fetch(CONNECT_FUNCTION_URL, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body:    JSON.stringify({ action: 'get_status' }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to sync Connect status');
+        }
+        const data = await resp.json();
+
+        // Refresh full state so settings.stripe* come from DB after edge function writes
+        await this._refreshState();
+
+        // Overlay fresh edge response in case refresh raced ahead of the write
+        this.state.settings = {
+            ...this.state.settings,
+            stripeAccountStatus:      data.status || this.state.settings?.stripeAccountStatus || 'not_created',
+            stripeAccountId:          data.accountId || this.state.settings?.stripeAccountId || '',
+            stripeFinancialAccountId: data.financialAccountId || this.state.settings?.stripeFinancialAccountId || '',
+            stripeRequirementsDue:    data.requirementsDue || [],
+            stripeDetailsSubmitted:   !!data.detailsSubmitted,
+        };
+
+        if (navigate) this.navigateTo('settings');
+
+        const status = this.state.settings.stripeAccountStatus;
+        if (status === 'active') {
+            this.showToast('Stripe Connect is active — ACH disbursements are ready.', 'success');
+        } else if (status === 'pending_verification') {
+            this.showToast('Onboarding submitted — Stripe is still verifying capabilities.', 'info');
+        } else if (status === 'pending_onboarding') {
+            const due = (data.requirementsDue || []).length;
+            this.showToast(
+                due
+                    ? `Stripe account saved. ${due} item${due === 1 ? '' : 's'} still required — continue onboarding.`
+                    : 'Stripe account saved. Continue onboarding to finish verification.',
+                'warning'
+            );
+        } else {
+            this.showToast('Stripe Connect is not set up yet.', 'info');
+        }
+
+        return data;
     },
 
     // ─── Setup Wizard ────────────────────────────────────────────

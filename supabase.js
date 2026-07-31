@@ -1138,12 +1138,15 @@ const AeroDB = {
 
         return {
             settings: {
-                companyName:   company.name,
-                ein:           company.ein           || '',
-                bankName:      company.bankName       || '',
-                routingNumber: company.routingNumber  || '',
-                accountNumber: company.accountNumber  || '',
-                paymentType:   company.paymentType    || 'direct_deposit',
+                companyName:               company.name,
+                ein:                       company.ein           || '',
+                bankName:                  company.bankName       || '',
+                routingNumber:             company.routingNumber  || '',
+                accountNumber:             company.accountNumber  || '',
+                paymentType:               company.paymentType    || 'direct_deposit',
+                stripeAccountId:           company.stripeAccountId || '',
+                stripeAccountStatus:       company.stripeAccountStatus || 'not_created',
+                stripeFinancialAccountId:  company.stripeFinancialAccountId || '',
             },
             employees,
             payrollHistory,
