@@ -8,9 +8,8 @@
  * Keys and price IDs are resolved from AeroConfig (config.js), which
  * auto-switches between sandbox and live based on hostname.
  *
- * Stripe Price IDs (live):
- *   Base $29/mo  : price_1TjzIk63pkYFHroZF5MNkxjQ
- *   Per seat $4  : price_1TjzIn63pkYFHroZ5OPRo0NM
+ * Stripe Price IDs come from AeroConfig (sandbox or live).
+ * Provision / refresh with: bash scripts/setup-stripe.sh
  */
 
 // All values come from config.js (loaded before this file).

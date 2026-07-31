@@ -15,6 +15,7 @@ const AeroConfig = (() => {
     const SANDBOX_HOSTS = ["localhost", "127.0.0.1"];
     const isSandboxHost = SANDBOX_HOSTS.includes(location.hostname)
         || location.hostname.endsWith(".local")
+        || location.hostname.endsWith(".vercel.app")
         || new URLSearchParams(location.search).get("sandbox") === "1";
 
     const override = localStorage.getItem("aeropay_env");
@@ -24,12 +25,12 @@ const AeroConfig = (() => {
               : "live";
 
     // ── Sandbox (test-mode) config ────────────────────────────────────────────
-    // Replace these values with your Stripe test-mode keys and price IDs.
-    // Test price IDs must be created in your Stripe Dashboard (test mode).
+    // Provisioned via `stripe sandbox create` for GlidePay (acct_1Tz4WmPUXh44gm6Z).
+    // Claim before 2026-08-07: stripe sandbox claim  (or see GO_LIVE.md)
     const SANDBOX = {
-        stripePublishableKey: "pk_test_REPLACE_WITH_YOUR_TEST_KEY",
-        priceBaseId:          "price_REPLACE_WITH_TEST_BASE_PRICE",
-        priceSeatId:          "price_REPLACE_WITH_TEST_SEAT_PRICE",
+        stripePublishableKey: "pk_test_51Tz4WmPUXh44gm6Z9jGnuT68CgC1OzmhUc96e5ZBQv0ElvR9aYnxGR7xdDsgya7rX3WSF1q4lHrqTS2TcJehl69s00yL2ctUsJ",
+        priceBaseId:          "price_1TzHeRPUXh44gm6ZKVoY1k8O",
+        priceSeatId:          "price_1TzHeRPUXh44gm6ZQPtrDRjk",
         supabaseUrl:          "https://ojvnxnlrghatkwjrlnop.supabase.co",
         // Edge functions are the same URL; secrets on the Supabase side switch
         // between live and test keys via `supabase secrets set`.
@@ -41,10 +42,12 @@ const AeroConfig = (() => {
     };
 
     // ── Live config ───────────────────────────────────────────────────────────
+    // Fresh Stripe account — fill via scripts/setup-stripe.sh after `stripe login`.
+    // Do not reuse keys from a prior AeroPay account.
     const LIVE = {
-        stripePublishableKey: "pk_live_51ThUrM63pkYFHroZwSp81uptqXfbshYAyng2LMObi4IEgSiwN9WC9vLTXNgethWELkrYf5jfuC5gNOa8bdhq3xA300HfpMxCaz",
-        priceBaseId:          "price_1TjzIk63pkYFHroZF5MNkxjQ",
-        priceSeatId:          "price_1TjzIn63pkYFHroZ5OPRo0NM",
+        stripePublishableKey: "pk_live_REPLACE_WITH_FRESH_ACCOUNT_KEY",
+        priceBaseId:          "price_REPLACE_WITH_LIVE_BASE_PRICE",
+        priceSeatId:          "price_REPLACE_WITH_LIVE_SEAT_PRICE",
         supabaseUrl:          "https://ojvnxnlrghatkwjrlnop.supabase.co",
         checkoutFunctionUrl:  "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-checkout",
         portalFunctionUrl:    "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/stripe-portal",
