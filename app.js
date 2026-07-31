@@ -266,8 +266,11 @@ const AeroApp = {
 
         AeroDB.onAuthChange(async (event, session) => {
             // Skip during signUp — company rows are still being created; handleSignUp loads state after.
-            if (event === 'SIGNED_IN' && session) {
+            if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
                 if (AeroDB._signingUp) return;
+                // Token refresh / multi-tab session sync re-emits SIGNED_IN. Reloading
+                // would yank the user off Run Payroll (and wipe the wizard) back to Dashboard.
+                if (this.session?.isLoggedIn) return;
                 await this._loadStateAndNavigate();
             } else if (event === 'SIGNED_OUT') {
                 this.state = {};
@@ -277,7 +280,7 @@ const AeroApp = {
         });
 
         const user = await AeroDB.getUser();
-        if (user) await this._loadStateAndNavigate();
+        if (user && !this.session?.isLoggedIn) await this._loadStateAndNavigate();
     },
 
     _loadStateAndNavigate: async function() {
@@ -488,7 +491,8 @@ const AeroApp = {
         if (!publicViews.includes(viewName) && (!this.session || !this.session.isLoggedIn)) {
             viewName = 'landing';
         }
-        
+
+        const previousView = this.currentView;
         this.currentView = viewName;
         
         // Update Sidebar Active state
@@ -665,19 +669,22 @@ const AeroApp = {
         document.getElementById('mainViewContent').innerHTML = htmlContent;
 
         // Run post-renders (like drawing charts or filling active table logs)
-        this.postViewRender(viewName);
+        this.postViewRender(viewName, previousView);
         this.updateSidebarProfile();
     },
 
-    postViewRender: function(viewName) {
+    postViewRender: function(viewName, previousView) {
         if (viewName === 'dashboard') {
             renderSpendChart('spendHistoryChart', this.state.payrollHistory);
             renderHeadcountChart('headcountChart', this.state.payrollHistory);
             renderDeptSpendChart('deptSpendChart', this.state.employees, this.state.payrollHistory);
         }
         else if (viewName === 'payroll') {
-            this.currentWizardStep = 1;
-            this.wizardGoToStep(1);
+            // Soft re-renders (state refresh) must not wipe an in-progress payroll run.
+            if (previousView !== 'payroll') {
+                this.currentWizardStep = 1;
+            }
+            this.wizardGoToStep(this.currentWizardStep || 1);
         }
         else if (viewName === 'time-tracking') {
             this.populateTimesheetEmployeeSelect();
