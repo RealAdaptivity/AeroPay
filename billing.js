@@ -182,9 +182,17 @@ const AeroBilling = {
      * Call this from _loadStateAndNavigate after state is loaded.
      */
     async renderBillingBanner() {
-        const sub     = await this.getSubscription();
         const banner  = document.getElementById("aeroBillingBanner");
         if (!banner) return;
+
+        // Billing is company-admin only — never show trial/paywall CTAs in the employee portal.
+        if (window.AeroApp?.session?.role === "employee") {
+            banner.style.display = "none";
+            banner.innerHTML = "";
+            return;
+        }
+
+        const sub = await this.getSubscription();
 
         if (!sub || sub.status === "incomplete" || sub.status === "incomplete_expired") {
             // Never subscribed
