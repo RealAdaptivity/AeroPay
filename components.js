@@ -725,7 +725,7 @@ function renderEmployeesView(state) {
             <div style="display:flex; justify-content:space-between; width:100%; align-items:center; flex-wrap:wrap; gap:16px;">
                 <div>
                     <h3 style="font-family:var(--font-heading); font-weight:700; font-size:18px;">Staff Directory</h3>
-                    <p style="font-size:13px; color:var(--text-secondary);">Manage employee withholding states, compensation packages, benefit plans, and contractor compensation residencies.</p>
+                    <p style="font-size:13px; color:var(--text-secondary);">Manage pay, benefits, and <strong>Invite to Portal</strong> (Portal column) so staff can sign in on the Employee tab.</p>
                 </div>
                 <button class="btn btn-primary" onclick="AeroApp.openAddEmployeeModal()">
                     <svg style="width:18px;height:18px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"></path></svg>
@@ -797,7 +797,7 @@ function renderEmployeesView(state) {
                                         ${portalLinked ? 'Portal linked' : 'Not invited'}
                                     </span>
                                     <div style="margin-top:6px;">
-                                        <button class="btn btn-outline" style="padding:4px 8px;font-size:11px;"
+                                        <button class="btn ${portalLinked ? 'btn-outline' : 'btn-primary'}" style="padding:6px 10px;font-size:12px;white-space:nowrap;"
                                             onclick="AeroApp.inviteEmployeeToPortal('${emp.id}')"
                                             title="${portalLinked ? 'Resend portal sign-in link' : 'Invite to Employee Portal'}">
                                             ${portalLinked ? 'Resend link' : 'Invite to Portal'}
@@ -3881,10 +3881,15 @@ function renderDirectoryView(state) {
                         <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         ${emp.state} · ${emp.type === 'salaried' ? 'Salaried' : 'Hourly'}
                     </div>
-                    <div style="font-size:12px;margin-top:4px;display:flex;gap:6px;align-items:center;">
+                    <div style="font-size:12px;margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                         <span class="badge badge-${emp.classification === '1099' ? 'warning' : 'success'}" style="padding:2px 8px;font-size:10px;">${emp.classification === '1099' ? '1099 Contractor' : 'W-2 Employee'}</span>
                         ${isSigned ? '<span class="badge badge-success" style="padding:2px 8px;font-size:10px;">W-2 Signed</span>' : ''}
+                        <span class="badge ${emp.userId ? 'badge-success' : 'badge-warning'}" style="padding:2px 8px;font-size:10px;">${emp.userId ? 'Portal linked' : 'Not invited'}</span>
                     </div>
+                    <button class="btn ${emp.userId ? 'btn-outline' : 'btn-primary'}" style="margin-top:10px;width:100%;padding:8px 10px;font-size:12px;"
+                        onclick="AeroApp.inviteEmployeeToPortal('${emp.id}')">
+                        ${emp.userId ? 'Resend Portal Link' : 'Invite to Portal'}
+                    </button>
                 </div>
             </div>`;
     });
