@@ -1843,7 +1843,7 @@ const AeroApp = {
             if (res && res.configured === false) {
                 this._setLocalFiling(formRef, null);
                 if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
-                this.showToast('No e-file provider connected yet. Connect one to transmit filings; you can still use "Mark Filed" for manual submissions.', 'warning');
+                this.showToast('TaxBandit is not configured yet. Set sandbox API credentials (Client ID / Secret / User Token) as Supabase secrets, then redeploy file-tax. You can still Mark Filed manually.', 'warning');
                 return;
             }
 
