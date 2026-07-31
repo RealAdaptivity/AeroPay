@@ -4500,6 +4500,121 @@ function renderEmployee401kView(state, employeeId) {
         </div>`;
 }
 
+function renderHelpDocsView(state) {
+    const company = state?.settings?.companyName || 'your company';
+    const sections = [
+        {
+            id: 'getting-started',
+            title: 'Getting started',
+            body: `
+                <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Complete company setup (legal name, EIN, funding bank).</li>
+                    <li>Subscribe on the billing banner if prompted.</li>
+                    <li>Open <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('settings');" style="color:var(--primary);font-weight:600;">Settings</a> and start Stripe Connect onboarding for ACH.</li>
+                    <li>Add employees under <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('employees');" style="color:var(--primary);font-weight:600;">Employees</a> or <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('onboarding');" style="color:var(--primary);font-weight:600;">Onboarding</a>.</li>
+                    <li>Run payroll when ready — submit for approval before ACH fires.</li>
+                </ol>`
+        },
+        {
+            id: 'payroll',
+            title: 'Running payroll',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 12px;line-height:1.6;">Use <strong>Run Payroll</strong> for a three-step cycle: enter hours → review taxes → submit.</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Hourly staff pull hours from Time Tracking; salaried staff use period rates.</li>
+                    <li>Submit sends the run to <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('approvals');" style="color:var(--primary);font-weight:600;">Approvals</a> as pending.</li>
+                    <li>Approve a run to mark it completed and initiate ACH for linked bank accounts.</li>
+                    <li>History and pay stubs live on the Dashboard and employee portal.</li>
+                </ul>`
+        },
+        {
+            id: 'ach-connect',
+            title: 'ACH & Stripe Connect',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 12px;line-height:1.6;">GlidePay uses Stripe Connect + Treasury to pay employees via ACH.</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Settings → <strong>Start / Continue Stripe Onboarding</strong> (KYB for ${company}).</li>
+                    <li>Status flow: Onboarding Required → Under Review → Active.</li>
+                    <li>If status looks stuck, use <strong>Refresh Status</strong> after returning from Stripe.</li>
+                    <li>Employees link their own bank accounts from the employee portal.</li>
+                    <li>New employee bank accounts may have a short security hold before the first transfer.</li>
+                </ul>`
+        },
+        {
+            id: 'employees',
+            title: 'Employees & onboarding',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>W-2 vs 1099 classification drives tax withholding and forms.</li>
+                    <li>Set pay type (hourly/salaried), frequency, state, and benefits on each profile.</li>
+                    <li>Onboarding tracks new-hire steps and document collection.</li>
+                    <li>Garnishments and pay advances are managed from employee records / Approvals.</li>
+                </ul>`
+        },
+        {
+            id: 'tax',
+            title: 'Tax & compliance',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li><a href="#" onclick="event.preventDefault();AeroApp.navigateTo('tax-compliance');" style="color:var(--primary);font-weight:600;">Tax Compliance</a> covers Form 941, W-2, and 1099 previews.</li>
+                    <li>You can mark filings as filed manually, or transmit when an e-file provider is connected.</li>
+                    <li>Employees can view/sign W-2s from their Documents area.</li>
+                </ul>`
+        },
+        {
+            id: 'billing',
+            title: 'Billing & plans',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>GlidePay bills a base subscription plus per-seat pricing.</li>
+                    <li>Use the billing banner to start Checkout or open the customer portal.</li>
+                    <li>ACH Connect onboarding is separate from subscription billing.</li>
+                </ul>`
+        },
+        {
+            id: 'support',
+            title: 'Support',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 8px;line-height:1.6;">Need help with ${company}'s account?</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Email <a href="mailto:support@glidepay.org" style="color:var(--primary);font-weight:600;">support@glidepay.org</a></li>
+                    <li>Review the <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('audit-log');" style="color:var(--primary);font-weight:600;">Audit Log</a> for recent system actions.</li>
+                    <li>Legal: <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);font-weight:600;">Privacy Policy</a> · <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('terms-of-service');" style="color:var(--primary);font-weight:600;">Terms of Service</a></li>
+                </ul>`
+        },
+    ];
+
+    const toc = sections.map(s => `
+        <a href="#help-${s.id}" style="display:block;padding:8px 0;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;border-bottom:1px solid var(--border-color);">
+            ${s.title}
+        </a>`).join('');
+
+    const articles = sections.map(s => `
+        <div class="card" id="help-${s.id}" style="padding:24px;margin-bottom:16px;scroll-margin-top:24px;">
+            <div class="section-title" style="margin-bottom:12px;">${s.title}</div>
+            ${s.body}
+        </div>`).join('');
+
+    return `
+        <div class="help-docs-layout" style="display:grid;grid-template-columns:minmax(200px,240px) 1fr;gap:24px;align-items:start;">
+            <div class="card help-docs-toc" style="padding:20px 24px;position:sticky;top:16px;">
+                <div class="section-title" style="margin-bottom:8px;">Topics</div>
+                <p style="font-size:12px;color:var(--text-tertiary);margin:0 0 8px;">Jump to a guide</p>
+                ${toc}
+            </div>
+            <div>
+                <div class="card" style="padding:24px;margin-bottom:16px;background:linear-gradient(135deg, rgba(79,70,229,0.06), rgba(14,165,233,0.06));border:1px solid var(--border-color);">
+                    <div class="section-title" style="margin-bottom:8px;">GlidePay Help Center</div>
+                    <p style="font-size:14px;color:var(--text-secondary);margin:0;line-height:1.6;">
+                        Short guides for the screens you use every pay cycle. Prefer email? Reach us at
+                        <a href="mailto:support@glidepay.org" style="color:var(--primary);font-weight:600;">support@glidepay.org</a>.
+                    </p>
+                </div>
+                ${articles}
+            </div>
+        </div>`;
+}
+
 // Export UI Renderers
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -4535,6 +4650,7 @@ if (typeof module !== 'undefined' && module.exports) {
         renderAuditLogView,
         renderEmployeePTOView,
         renderEmployeeBenefitsView,
-        renderEmployee401kView
+        renderEmployee401kView,
+        renderHelpDocsView
     };
 }
