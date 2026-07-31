@@ -265,7 +265,9 @@ const AeroApp = {
         this.navigateTo('landing');
 
         AeroDB.onAuthChange(async (event, session) => {
+            // Skip during signUp — company rows are still being created; handleSignUp loads state after.
             if (event === 'SIGNED_IN' && session) {
+                if (AeroDB._signingUp) return;
                 await this._loadStateAndNavigate();
             } else if (event === 'SIGNED_OUT') {
                 this.state = {};
@@ -1912,11 +1914,8 @@ const AeroApp = {
         this._setButtonLoading(btn, true);
         try {
             await AeroDB.signUp(email, password, companyName);
-            document.getElementById('regStep2').style.display   = 'none';
-            document.getElementById('regSuccess').style.display = 'block';
-            document.getElementById('regHaveAccount').style.display = 'none';
-            const lbl = document.getElementById('regSuccessEmail');
-            if (lbl) lbl.textContent = `Confirmation sent to: ${email}`;
+            this.showToast('Account created — welcome to GlidePay!', 'success');
+            await this._loadStateAndNavigate();
         } catch (err) {
             this.showToast(err.message || 'Registration failed. Please try again.', 'danger');
         } finally {

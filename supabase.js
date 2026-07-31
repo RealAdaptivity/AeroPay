@@ -124,6 +124,9 @@ function _toAppRun(run, lineItems = []) {
 // ─────────────────────────────────────────────
 const AeroDB = {
 
+    /** True while signUp is creating company rows — auth SIGNED_IN must wait. */
+    _signingUp: false,
+
     /**
      * Sign up a new company owner. Creates auth user, company row,
      * and company_users membership in one flow.
@@ -134,27 +137,32 @@ const AeroDB = {
      * @returns {{ user, company }}
      */
     async signUp(email, password, companyName) {
-        const { data: authData, error: authError } = await _sb.auth.signUp({ email, password });
-        if (authError) throw new Error(`Sign-up failed: ${authError.message}`);
+        this._signingUp = true;
+        try {
+            const { data: authData, error: authError } = await _sb.auth.signUp({ email, password });
+            if (authError) throw new Error(`Sign-up failed: ${authError.message}`);
 
-        const user = authData.user;
+            const user = authData.user;
 
-        // Create company
-        const company = _check(
-            await _sb.from('companies').insert({ name: companyName, owner_id: user.id }).select().single(),
-            'signUp → create company'
-        );
+            // Create company
+            const company = _check(
+                await _sb.from('companies').insert({ name: companyName, owner_id: user.id }).select().single(),
+                'signUp → create company'
+            );
 
-        // Create company_users record
-        _check(
-            await _sb.from('company_users').insert({ company_id: company.id, user_id: user.id, role: 'owner' }),
-            'signUp → company_users'
-        );
+            // Create company_users record
+            _check(
+                await _sb.from('company_users').insert({ company_id: company.id, user_id: user.id, role: 'owner' }),
+                'signUp → company_users'
+            );
 
-        // Bootstrap integration settings row
-        await _sb.from('integrations').insert({ company_id: company.id }).maybeSingle();
+            // Bootstrap integration settings row
+            await _sb.from('integrations').insert({ company_id: company.id }).maybeSingle();
 
-        return { user, company };
+            return { user, company };
+        } finally {
+            this._signingUp = false;
+        }
     },
 
     /**
@@ -194,22 +202,36 @@ const AeroDB = {
 
     /** Fetch the company record for the logged-in user. */
     async getCompany() {
-        const data = _check(
-            await _sb.from('companies').select('*').single(),
-            'getCompany'
-        );
-        return {
-            id:                       data.id,
-            name:                     data.name,
-            ein:                      data.ein,
-            bankName:                 data.bank_name,
-            routingNumber:            data.routing_number,
-            accountNumber:            data.account_number,
-            paymentType:              data.payment_type,
-            stripeAccountId:          data.stripe_account_id          || '',
-            stripeAccountStatus:      data.stripe_account_status       || 'not_created',
-            stripeFinancialAccountId: data.stripe_financial_account_id || '',
-        };
+        const user = await this.getUser();
+        if (!user) throw new Error('getCompany: not signed in');
+
+        // Retry briefly — signup can race ahead of the companies insert
+        // when auth fires SIGNED_IN before company rows exist.
+        let lastErr;
+        for (let attempt = 0; attempt < 8; attempt++) {
+            const result = await _sb.from('companies').select('*').eq('owner_id', user.id).maybeSingle();
+            if (result.error) {
+                lastErr = result.error;
+            } else if (result.data) {
+                const data = result.data;
+                return {
+                    id:                       data.id,
+                    name:                     data.name,
+                    ein:                      data.ein,
+                    bankName:                 data.bank_name,
+                    routingNumber:            data.routing_number,
+                    accountNumber:            data.account_number,
+                    paymentType:              data.payment_type,
+                    setupComplete:            !!data.setup_complete,
+                    setupStep:                data.setup_step || 1,
+                    stripeAccountId:          data.stripe_account_id          || '',
+                    stripeAccountStatus:      data.stripe_account_status       || 'not_created',
+                    stripeFinancialAccountId: data.stripe_financial_account_id || '',
+                };
+            }
+            await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+        }
+        throw new Error(`getCompany: ${lastErr?.message || 'company not found for this account'}`);
     },
 
     /** Update company settings (EIN, bank details, name). */
@@ -1144,6 +1166,8 @@ const AeroDB = {
                 routingNumber: company.routingNumber  || '',
                 accountNumber: company.accountNumber  || '',
                 paymentType:   company.paymentType    || 'direct_deposit',
+                setupComplete: company.setupComplete  || false,
+                setupStep:     company.setupStep      || 1,
             },
             employees,
             payrollHistory,
