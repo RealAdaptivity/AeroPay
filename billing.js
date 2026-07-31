@@ -222,14 +222,41 @@ const AeroBilling = {
         const params = new URLSearchParams(window.location.search);
         if (params.get("checkout") === "success") {
             AeroApp.showToast("🎉 Subscription activated! Welcome to GlidePay.", "success");
-            // Clean the URL
             window.history.replaceState({}, "", window.location.pathname);
-            // Give webhook a moment then refresh billing banner
-            setTimeout(() => AeroBilling.renderBillingBanner(), 3000);
+            // Sync from Stripe in case the webhook lagged, then refresh UI
+            this.syncSubscription()
+                .catch((err) => console.warn("[AeroBilling] sync after checkout:", err))
+                .finally(() => {
+                    this.renderBillingBanner();
+                    if (window.AeroApp?.currentView === "settings") {
+                        window.AeroApp.navigateTo("settings");
+                    }
+                });
         } else if (params.get("checkout") === "canceled") {
             AeroApp.showToast("Checkout canceled — no charges were made.", "info");
             window.history.replaceState({}, "", window.location.pathname);
         }
+    },
+
+    /** Pull latest Stripe subscription into Supabase (post-Checkout safety net). */
+    async syncSubscription() {
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) return null;
+
+        const resp = await fetch(CHECKOUT_FUNCTION_URL, {
+            method:  "POST",
+            headers: {
+                "Content-Type":  "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action: "sync_subscription" }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || "sync_subscription failed");
+        }
+        return resp.json();
     },
 
     /**

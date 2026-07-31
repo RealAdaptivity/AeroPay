@@ -42,6 +42,9 @@ serve(async (req: Request) => {
         if (action === "update_seats") {
             return await handleUpdateSeats(user.id, body);
         }
+        if (action === "sync_subscription") {
+            return await handleSyncSubscription(user.id);
+        }
         return await handleCheckout(user.id, body);
     } catch (err) {
         console.error("[stripe-checkout]", err);
@@ -123,11 +126,11 @@ async function handleUpdateSeats(userId: string, body: any) {
         .from("subscriptions")
         .select("stripe_subscription_id")
         .eq("company_id", companyUser.company_id)
-        .eq("status", "active")
+        .in("status", ["active", "trialing"])
         .maybeSingle();
 
     if (!sub?.stripe_subscription_id) {
-        // No active sub — nothing to update
+        // No active/trialing sub — nothing to update
         return json({ updated: false });
     }
 
@@ -145,6 +148,94 @@ async function handleUpdateSeats(userId: string, body: any) {
     });
 
     return json({ updated: true });
+}
+
+/**
+ * Pull the company's latest Stripe subscription into Supabase.
+ * Used after Checkout return when the webhook has not written the row yet.
+ */
+async function handleSyncSubscription(userId: string) {
+    const { data: companyUser } = await supabase
+        .from("company_users")
+        .select("company_id")
+        .eq("user_id", userId)
+        .single();
+
+    if (!companyUser) return json({ error: "Company not found" }, 404);
+    const companyId = companyUser.company_id;
+
+    const { data: existing } = await supabase
+        .from("subscriptions")
+        .select("stripe_customer_id, stripe_subscription_id, status")
+        .eq("company_id", companyId)
+        .maybeSingle();
+
+    let stripeSub: Stripe.Subscription | null = null;
+
+    if (existing?.stripe_subscription_id) {
+        stripeSub = await stripe.subscriptions.retrieve(existing.stripe_subscription_id);
+    } else {
+        let customerId = existing?.stripe_customer_id as string | undefined;
+        if (!customerId) {
+            const customers = await stripe.customers.search({
+                query: `metadata["company_id"]:"${companyId}"`,
+                limit: 1,
+            });
+            customerId = customers.data[0]?.id;
+        }
+        if (!customerId) return json({ synced: false, reason: "no_customer" });
+
+        const list = await stripe.subscriptions.list({
+            customer: customerId,
+            status:   "all",
+            limit:    5,
+        });
+        stripeSub = list.data.find((s) => ["trialing", "active", "past_due"].includes(s.status))
+            ?? list.data[0]
+            ?? null;
+    }
+
+    if (!stripeSub) return json({ synced: false, reason: "no_subscription" });
+
+    const item = stripeSub.items.data[0] as
+        { current_period_start?: number; current_period_end?: number; quantity?: number } | undefined;
+    const startUnix = (stripeSub as any).current_period_start ?? item?.current_period_start ?? null;
+    const endUnix   = (stripeSub as any).current_period_end   ?? item?.current_period_end   ?? null;
+    const toIso = (unix: number | null) =>
+        unix != null && Number.isFinite(Number(unix))
+            ? new Date(Number(unix) * 1000).toISOString()
+            : null;
+
+    let seatCount = 1;
+    for (const it of stripeSub.items.data) {
+        if (it.price?.metadata?.type === "per_seat") {
+            seatCount = it.quantity ?? 1;
+            break;
+        }
+        if ((it.quantity ?? 1) > seatCount) seatCount = it.quantity ?? 1;
+    }
+
+    const { error } = await supabase.from("subscriptions").upsert({
+        company_id:             companyId,
+        stripe_customer_id:     stripeSub.customer as string,
+        stripe_subscription_id: stripeSub.id,
+        status:                 stripeSub.status,
+        seat_count:             seatCount,
+        current_period_start:   toIso(startUnix),
+        current_period_end:     toIso(endUnix),
+        cancel_at_period_end:   !!stripeSub.cancel_at_period_end,
+        canceled_at:            toIso(stripeSub.canceled_at as number | null),
+        trial_end:              toIso(stripeSub.trial_end as number | null),
+        updated_at:             new Date().toISOString(),
+    }, { onConflict: "company_id" });
+
+    if (error) throw new Error(error.message);
+
+    return json({
+        synced: true,
+        status: stripeSub.status,
+        subscriptionId: stripeSub.id,
+    });
 }
 
 function json(data: object, status = 200) {
