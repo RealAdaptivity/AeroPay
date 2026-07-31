@@ -13,7 +13,8 @@ Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh 
 | Sandbox publishable key (GlidePay Test) | Done |
 | Sandbox price IDs ($29 + $4/seat) | Done |
 | Sandbox webhook (subscriptions + account.updated) | Done |
-| Treasury events on webhook | Pending — enable Treasury in test Dashboard |
+| Treasury for platforms (sandbox) | Done — Connect → Stripe Treasury visible |
+| Treasury events on webhook | Done |
 | Supabase secrets / function deploy | Needs Supabase auth |
 | Live `pk_live` + live prices | Placeholders |
 | Treasury for platforms (live) | Apply in Dashboard after sandbox validation |
@@ -29,9 +30,9 @@ Using **GlidePay Test** (`acct_1TkoXCAsgAzfeB6D`).
 | Publishable key | in `config.js` |
 | Base price $29/mo | `price_1TzIdaAsgAzfeB6DKeordaY7` |
 | Seat price $4/mo | `price_1TzIdbAsgAzfeB6D0GyWkgXK` |
-| Webhook | `we_1TzIe4AsgAzfeB6D5DUtFuR5` → edge `stripe-webhook` |
+| Webhook | `we_1TzIe4AsgAzfeB6D5DUtFuR5` → edge `stripe-webhook` (includes Treasury events) |
 
-**You still need:** Dashboard → **Treasury → Get started** (test mode). After that, add the three `treasury.outbound_transfer.*` events to the webhook.
+Treasury for Platforms is active in this sandbox. Financial accounts are created via API when companies complete Connect onboarding in the app.
 
 ---
 
