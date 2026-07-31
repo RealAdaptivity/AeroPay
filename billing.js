@@ -25,47 +25,68 @@ const PRICE_SEAT_ID          = AeroConfig.priceSeatId;
 const AeroBilling = {
 
     /**
-     * Start a Stripe Checkout session for a new subscription.
+     * Start a Stripe Checkout session for a new subscription (with free trial).
      * Redirects the browser to Stripe-hosted Checkout.
      *
      * @param {number} employeeCount  Number of employees (drives seat price quantity)
      */
     async startCheckout(employeeCount = 1) {
-        const session = await _sb.auth.getSession();
-        const token   = session.data?.session?.access_token;
+        try {
+            const session = await _sb.auth.getSession();
+            const token   = session.data?.session?.access_token;
 
-        if (!token) {
-            AeroApp.showToast("Please sign in before subscribing.", "warning");
-            return;
+            if (!token) {
+                AeroApp.showToast("Please sign in before starting your trial.", "warning");
+                return;
+            }
+
+            if (!PRICE_BASE_ID || PRICE_BASE_ID.includes("REPLACE")
+                || !PRICE_SEAT_ID || PRICE_SEAT_ID.includes("REPLACE")) {
+                AeroApp.showToast(
+                    "Billing is not configured yet (missing Stripe price IDs). Add ?sandbox=1 or set sandbox prices.",
+                    "danger"
+                );
+                return;
+            }
+
+            AeroApp.showToast("Opening Stripe Checkout…", "info");
+
+            const company = await AeroDB.getCompany();
+
+            const resp = await fetch(CHECKOUT_FUNCTION_URL, {
+                method:  "POST",
+                headers: {
+                    "Content-Type":  "application/json",
+                    "Authorization": `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    companyId:     company.id,
+                    companyName:   company.name,
+                    employeeCount: Math.max(1, employeeCount),
+                    priceBaseId:   PRICE_BASE_ID,
+                    priceSeatId:   PRICE_SEAT_ID,
+                    trialDays:     AeroConfig.trialDays ?? 14,
+                    successUrl:    window.location.origin + window.location.pathname + "?checkout=success",
+                    cancelUrl:     window.location.origin + window.location.pathname + "?checkout=canceled",
+                }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                AeroApp.showToast(err.error || "Failed to start checkout. Please try again.", "danger");
+                return;
+            }
+
+            const { url } = await resp.json();
+            if (!url) {
+                AeroApp.showToast("Checkout session missing redirect URL.", "danger");
+                return;
+            }
+            window.location.href = url;
+        } catch (err) {
+            console.error("[AeroBilling] startCheckout:", err);
+            AeroApp.showToast("Failed to start trial: " + (err.message || "unknown error"), "danger");
         }
-
-        const company = await AeroDB.getCompany();
-
-        const resp = await fetch(CHECKOUT_FUNCTION_URL, {
-            method:  "POST",
-            headers: {
-                "Content-Type":  "application/json",
-                "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-                companyId:     company.id,
-                companyName:   company.name,
-                employeeCount: Math.max(1, employeeCount),
-                priceBaseId:   PRICE_BASE_ID,
-                priceSeatId:   PRICE_SEAT_ID,
-                successUrl:    window.location.origin + window.location.pathname + "?checkout=success",
-                cancelUrl:     window.location.origin + window.location.pathname + "?checkout=canceled",
-            }),
-        });
-
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            AeroApp.showToast(err.error || "Failed to start checkout. Please try again.", "danger");
-            return;
-        }
-
-        const { url } = await resp.json();
-        window.location.href = url;
     },
 
     /**
@@ -166,7 +187,7 @@ const AeroBilling = {
             // Never subscribed
             banner.innerHTML = _buildBanner(
                 "warning",
-                "⚡ No active subscription — upgrade to unlock payroll processing and ACH disbursements.",
+                "⚡ No active subscription — start your free trial to unlock payroll and ACH.",
                 "Start Free Trial",
                 `AeroBilling.startCheckout(${(window.AeroApp?.state?.employees?.length) || 1})`
             );
@@ -237,9 +258,9 @@ const AeroBilling = {
             <!-- No active plan -->
             <div style="padding:24px; text-align:center; border:1px dashed var(--border-color); border-radius:var(--radius-md); margin-bottom:24px;">
                 <div style="font-size:32px; margin-bottom:12px;">🚀</div>
-                <h3 style="font-family:var(--font-heading); margin-bottom:8px;">Start your GlidePay subscription</h3>
+                <h3 style="font-family:var(--font-heading); margin-bottom:8px;">Start your GlidePay free trial</h3>
                 <p style="font-size:14px; color:var(--text-secondary); margin-bottom:20px;">
-                    $29/mo base + $4/employee · Instant activation · Cancel any time
+                    ${AeroConfig.trialDays || 14}-day free trial · then $29/mo base + $4/employee · Cancel any time
                 </p>
                 <div style="display:flex; justify-content:center; gap:16px; margin-bottom:20px; flex-wrap:wrap;">
                     <div class="billing-feature-pill">✓ Unlimited payroll runs</div>
@@ -248,7 +269,7 @@ const AeroBilling = {
                     <div class="billing-feature-pill">✓ Tax compliance</div>
                 </div>
                 <button class="btn btn-primary" style="min-width:200px;" onclick="AeroBilling.startCheckout(${employeeCount})">
-                    Subscribe Now — $${monthlyTotal}/mo
+                    Start Free Trial
                 </button>
                 <p style="font-size:11px; color:var(--text-tertiary); margin-top:10px;">
                     Secured by Stripe · 256-bit SSL encryption
