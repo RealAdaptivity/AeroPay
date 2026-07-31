@@ -1,7 +1,7 @@
 # GlidePay — Sandbox Testing Guide
 ### Full end-to-end test of the Treasury ACH payroll disbursement flow
 
-See also [GO_LIVE.md](./GO_LIVE.md) for claim/cutover steps.
+See also [GO_LIVE.md](./GO_LIVE.md) for cutover steps.
 
 ---
 
@@ -13,7 +13,7 @@ Before testing locally you need:
 2. Your Stripe **test-mode keys** (`pk_test_…`, `sk_test_…`)
 3. Your Supabase project credentials
 
-A claimable sandbox was already provisioned with GlidePay products/prices and `config.js` SANDBOX keys filled in. **Claim it** (see GO_LIVE.md) before creating the webhook — claimable RAKs cannot register webhook endpoints.
+Use the **GlidePay Test** sandbox. Create the webhook with a secret/restricted key from that account (publishable keys cannot register webhooks).
 
 ---
 
@@ -21,10 +21,11 @@ A claimable sandbox was already provisioned with GlidePay products/prices and `c
 
 ### Frontend (`config.js`)
 
-Sandbox publishable key + price IDs are already set for the provisioned sandbox:
+Sandbox publishable key + price IDs are set for **GlidePay Test** (`acct_1TkoXCAsgAzfeB6D`):
 
-- Base: `price_1TzHeRPUXh44gm6ZKVoY1k8O` ($29/mo)
-- Seat: `price_1TzHeRPUXh44gm6ZQPtrDRjk` ($4/mo, metadata `type=per_seat`)
+- Base: `price_1TzIdaAsgAzfeB6DKeordaY7` ($29/mo)
+- Seat: `price_1TzIdbAsgAzfeB6D0GyWkgXK` ($4/mo, metadata `type=per_seat`)
+- Test webhook registered → `…/functions/v1/stripe-webhook` (Connect + Treasury outbound transfer events)
 
 When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
 
@@ -198,9 +199,9 @@ Use the failure accounts to test webhook handling of `treasury.outbound_transfer
 
 ## Checklist
 
-- [ ] Claim sandbox / have full `sk_test_…` key
-- [ ] `config.js` SANDBOX keys filled in
-- [ ] Supabase secrets updated to `sk_test_…`
+- [ ] GlidePay Test `pk_test_…` in `config.js`
+- [ ] GlidePay Test price IDs in `config.js`
+- [ ] Supabase secrets updated to `sk_test_…` from GlidePay Test
 - [ ] DB migrations applied (`supabase db push`)
 - [ ] All edge functions deployed
 - [ ] Test webhook endpoint registered with "connected accounts" events enabled
