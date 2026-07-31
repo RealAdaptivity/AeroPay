@@ -15,7 +15,7 @@ Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh 
 | Sandbox webhook (subscriptions + account.updated) | Done |
 | Treasury for platforms (sandbox) | Done — Connect → Stripe Treasury visible |
 | Treasury events on webhook | Done |
-| Supabase secrets / function deploy | Needs Supabase auth |
+| Supabase secrets / function deploy | Done — secrets set, migrations applied, functions deployed |
 | Live `pk_live` + live prices | Placeholders |
 | Treasury for platforms (live) | Apply in Dashboard after sandbox validation |
 
