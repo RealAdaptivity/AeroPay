@@ -9,34 +9,26 @@ Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh 
 | Item | Status |
 |---|---|
 | Domain `glidepay.org` + HTTPS | Done (GitHub Pages) |
-| GlidePay rebrand (UI, emails, logos) | In this PR |
-| Sandbox products + prices ($29 + $4/seat) | Created on claimable sandbox `acct_1Tz4WmPUXh44gm6Z` |
-| Sandbox publishable key + price IDs in `config.js` | Done |
-| Sandbox webhook endpoint | Needs full key (claim sandbox or use your account) |
-| Supabase secrets / function deploy | Needs Supabase CLI auth |
-| Live `pk_live` + live prices | Placeholders — run setup against your fresh account |
+| GlidePay rebrand (UI, emails, logos) | Done |
+| Sandbox publishable key (GlidePay Test) | In `config.js` |
+| Sandbox price IDs | Waiting — paste from GlidePay Test Dashboard |
+| Sandbox webhook endpoint | Needs secret key + webhook setup |
+| Supabase secrets / function deploy | Needs Supabase auth |
+| Live `pk_live` + live prices | Placeholders |
 | Treasury for platforms (live) | Apply in Dashboard after sandbox validation |
 
 ---
 
-## A. Claim the sandbox (do this first)
+## A. GlidePay Test sandbox
 
-A claimable Stripe sandbox was provisioned for GlidePay. **Claim it before 2026-08-07** or products/prices disappear:
+Use the existing **GlidePay Test** Stripe sandbox (not the accidental claimable sandbox).
 
-1. Open: https://dashboard.stripe.com/onboard_sandbox/YWNjdF8xVHo0V21QVVhoNDRnbTZaLDE3ODYxMTM2NDMv100c5jLQrx5  
-   Or run: `stripe sandbox claim`
-2. After claiming, run `stripe login` and copy the **full** test secret key (`sk_test_…` or an `rk_test_…` RAK).
-3. Dashboard → Treasury → Get started (sandbox activation is instant).
+`config.js` already has the GlidePay Test publishable key. Add the two price IDs from Dashboard → Products (test mode):
 
-Sandbox already has:
+- Base $29/mo → `SANDBOX.priceBaseId`
+- Seat $4/mo (metadata `type=per_seat`) → `SANDBOX.priceSeatId`
 
-| Resource | ID |
-|---|---|
-| Publishable key | `pk_test_51Tz4Wm…` (in `config.js`) |
-| Base price $29/mo | `price_1TzHeRPUXh44gm6ZKVoY1k8O` |
-| Seat price $4/mo | `price_1TzHeRPUXh44gm6ZQPtrDRjk` |
-
-Restricted claimable keys cannot create webhooks — use the post-claim secret key for that.
+Enable Treasury in test mode: Dashboard → Treasury → Get started.
 
 ---
 

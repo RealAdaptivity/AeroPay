@@ -21,10 +21,10 @@ A claimable sandbox was already provisioned with GlidePay products/prices and `c
 
 ### Frontend (`config.js`)
 
-Sandbox publishable key + price IDs are already set for the provisioned sandbox:
+Sandbox publishable key is set for **GlidePay Test**. Fill in price IDs from that Dashboard (test mode):
 
-- Base: `price_1TzHeRPUXh44gm6ZKVoY1k8O` ($29/mo)
-- Seat: `price_1TzHeRPUXh44gm6ZQPtrDRjk` ($4/mo, metadata `type=per_seat`)
+- Base $29/mo → `SANDBOX.priceBaseId`
+- Seat $4/mo with metadata `type=per_seat` → `SANDBOX.priceSeatId`
 
 When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
 
