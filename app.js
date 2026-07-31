@@ -529,6 +529,11 @@ const AeroApp = {
                 subtitleText = "Update routing records, EINS, and payroll deposit preferences";
                 htmlContent = renderSettingsView(this.state);
                 break;
+            case 'help':
+                titleText = "Help & Docs";
+                subtitleText = "Guides for payroll, ACH, tax, and GlidePay setup";
+                htmlContent = renderHelpDocsView(this.state);
+                break;
             case 'onboarding':
                 titleText = "Employee Onboarding";
                 subtitleText = "Manage new hire workflows and document collection";

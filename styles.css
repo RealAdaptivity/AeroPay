@@ -2212,3 +2212,11 @@ body.employee-mode .admin-only {
 .setup-check-icon { font-size:16px; font-weight:700; color:var(--text-tertiary); width:20px; text-align:center; }
 .setup-check-item.done .setup-check-icon { color:var(--success); }
 @media (max-width:768px) { .setup-wizard-wrap { grid-template-columns:1fr; } .setup-sidebar { display:none; } .setup-main { padding:32px 20px; } }
+
+/* Help & Docs */
+.help-docs-layout { display: grid; grid-template-columns: minmax(200px, 240px) 1fr; gap: 24px; align-items: start; }
+.help-docs-toc { position: sticky; top: 16px; }
+@media (max-width: 860px) {
+    .help-docs-layout { grid-template-columns: 1fr; }
+    .help-docs-toc { position: static; }
+}
