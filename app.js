@@ -265,7 +265,9 @@ const AeroApp = {
         this.navigateTo('landing');
 
         AeroDB.onAuthChange(async (event, session) => {
+            // Skip during signUp — company rows are still being created; handleSignUp loads state after.
             if (event === 'SIGNED_IN' && session) {
+                if (AeroDB._signingUp) return;
                 await this._loadStateAndNavigate();
             } else if (event === 'SIGNED_OUT') {
                 this.state = {};
@@ -320,6 +322,11 @@ const AeroApp = {
         } catch (err) {
             console.error('[AeroApp] Failed to load state:', err);
             this.showToast('Failed to load company data. Please refresh.', 'danger');
+            // If we have a session but load failed (e.g. transient race), offer a soft retry
+            setTimeout(() => {
+                if (AeroDB._signingUp) return;
+                this._loadStateAndNavigate().catch(() => {});
+            }, 800);
         }
     },
 
@@ -378,8 +385,6 @@ const AeroApp = {
             } catch (err) { this.showToast('Failed to save: ' + err.message, 'danger'); }
         }
     },
-
-    openAddEmployeeModal: function() { this.openModal('addEmployee'); },
 
     completeSetup: async function(destination) {
         try {
@@ -669,6 +674,145 @@ const AeroApp = {
         document.getElementById('modalOverlay').classList.remove('active');
     },
 
+    // --- Onboarding (New Hire) Handlers ---
+    openNewHireForm: function() {
+        const today = new Date().toISOString().slice(0, 10);
+        const body = `
+            <form id="newHireForm" onsubmit="AeroApp.handleAddNewHire(event)">
+                <div class="form-grid">
+                    <div class="form-group col-span-2">
+                        <label for="hireName">Full Name</label>
+                        <input type="text" class="form-control" id="hireName" required placeholder="e.g. Alex Rivera">
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label for="hireEmail">Work Email</label>
+                        <input type="email" class="form-control" id="hireEmail" required placeholder="e.g. alex@company.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="hireRole">Role / Title</label>
+                        <input type="text" class="form-control" id="hireRole" required placeholder="e.g. Backend Engineer">
+                    </div>
+                    <div class="form-group">
+                        <label for="hireDept">Department</label>
+                        <select class="form-control" id="hireDept">
+                            <option value="Engineering">Engineering</option>
+                            <option value="Sales & Marketing">Sales & Marketing</option>
+                            <option value="Customer Support">Customer Support</option>
+                            <option value="Product Design">Product Design</option>
+                            <option value="Operations & HR">Operations & HR</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label for="hireStartDate">Start Date</label>
+                        <input type="date" class="form-control" id="hireStartDate" required value="${today}">
+                    </div>
+                </div>
+                <p style="font-size:12px;color:var(--text-tertiary);margin-top:12px;">
+                    This adds them to the onboarding pipeline. Use Employees → Onboard Staff to create their payroll record when ready.
+                </p>
+                <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
+                    <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add to Pipeline</button>
+                </div>
+            </form>
+        `;
+        this.openModal('Add New Hire', body);
+    },
+
+    handleAddNewHire: async function(e) {
+        e.preventDefault();
+        const hire = {
+            name:      document.getElementById('hireName').value.trim(),
+            email:     document.getElementById('hireEmail').value.trim(),
+            role:      document.getElementById('hireRole').value.trim(),
+            department: document.getElementById('hireDept').value,
+            startDate: document.getElementById('hireStartDate').value,
+            status:    'pending-docs',
+        };
+        if (!hire.name || !hire.email || !hire.role) {
+            return this.showToast('Please fill in name, email, and role.', 'warning');
+        }
+        try {
+            const created = await AeroDB.addToOnboarding(hire);
+            if (!this.state.onboardingQueue) this.state.onboardingQueue = [];
+            this.state.onboardingQueue.unshift(created);
+            this.closeModal();
+            this.showToast(`${hire.name} added to onboarding`, 'success');
+            this.navigateTo('onboarding');
+        } catch (err) {
+            console.error('[AeroApp] handleAddNewHire:', err);
+            this.showToast('Failed to add hire: ' + (err.message || String(err)), 'danger');
+        }
+    },
+
+    openOnboardingWizard: function(id) {
+        const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
+        if (!hire) return this.showToast('Onboarding record not found.', 'warning');
+
+        const steps = ['Personal Info', 'Role & Pay', 'Benefits Setup', 'Document Signing', 'IT Provisioning'];
+        const stepCards = steps.map((label, i) => {
+            const n = i + 1;
+            const done = n < hire.step;
+            const current = n === hire.step;
+            const bg = done ? 'var(--success-light, #dcfce7)' : current ? 'var(--primary-light)' : 'var(--bg-tertiary)';
+            const color = done ? 'var(--success)' : current ? 'var(--primary)' : 'var(--text-tertiary)';
+            return `
+                <div style="padding:12px 14px;border-radius:var(--radius-md);background:${bg};border:1px solid ${current ? 'var(--primary)' : 'transparent'};">
+                    <div style="font-size:11px;font-weight:700;color:${color};">STEP ${n}</div>
+                    <div style="font-size:13px;font-weight:600;margin-top:2px;">${label}</div>
+                    <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">${done ? 'Complete' : current ? 'In progress' : 'Upcoming'}</div>
+                </div>`;
+        }).join('');
+
+        const canAdvance = hire.step < hire.totalSteps && hire.status !== 'complete';
+        const body = `
+            <div style="margin-bottom:16px;">
+                <div style="font-weight:700;font-size:16px;">${hire.name}</div>
+                <div style="font-size:13px;color:var(--text-secondary);">${hire.role} · ${hire.department}</div>
+                <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Start date: ${hire.startDate || 'TBD'} · ${hire.email}</div>
+            </div>
+            <div style="display:grid;gap:8px;margin-bottom:20px;">${stepCards}</div>
+            <div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Close</button>
+                ${canAdvance ? `<button type="button" class="btn btn-primary" onclick="AeroApp.advanceOnboardingStep('${hire.id}')">Mark Step ${hire.step} Complete</button>` : ''}
+                ${hire.status !== 'complete' ? `<button type="button" class="btn btn-outline" onclick="AeroApp.completeOnboarding('${hire.id}')">Mark Fully Complete</button>` : ''}
+            </div>
+        `;
+        this.openModal('Onboarding Progress', body, true);
+    },
+
+    advanceOnboardingStep: async function(id) {
+        const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
+        if (!hire) return;
+        const nextStep = Math.min(hire.step + 1, hire.totalSteps);
+        const status = nextStep >= hire.totalSteps ? 'complete' : (nextStep >= 4 ? 'pending-docs' : 'in-progress');
+        try {
+            await AeroDB.updateOnboardingStatus(id, { step: nextStep, status });
+            hire.step = nextStep;
+            hire.status = status;
+            this.showToast(status === 'complete' ? `${hire.name} onboarding complete` : `Advanced to step ${nextStep}`, 'success');
+            this.openOnboardingWizard(id);
+            this.navigateTo('onboarding');
+        } catch (err) {
+            this.showToast('Failed to update: ' + (err.message || String(err)), 'danger');
+        }
+    },
+
+    completeOnboarding: async function(id) {
+        const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
+        if (!hire) return;
+        try {
+            await AeroDB.updateOnboardingStatus(id, { step: hire.totalSteps, status: 'complete' });
+            hire.step = hire.totalSteps;
+            hire.status = 'complete';
+            this.closeModal();
+            this.showToast(`${hire.name} marked complete`, 'success');
+            this.navigateTo('onboarding');
+        } catch (err) {
+            this.showToast('Failed to complete: ' + (err.message || String(err)), 'danger');
+        }
+    },
+
     // --- Employee Directory Handlers ---
     openAddEmployeeModal: function() {
         const body = `
@@ -820,13 +964,17 @@ const AeroApp = {
         };
         try {
             const created = await AeroDB.addEmployee(newEmp);
+            if (!this.state.employees) this.state.employees = [];
             this.state.employees.push(created);
             this.closeModal();
             this.showToast(`Successfully onboarded ${newEmp.name}`, 'success');
             if (this.setupStep === 2) { this.setupGoTo(2); } else { this.navigateTo('employees'); }
             this.populateW2Selectors();
             if (typeof AeroBilling !== 'undefined') AeroBilling.updateSeatCount(this.state.employees.length);
-        } catch (err) { this.showToast('Failed to save employee: ' + err.message, 'danger'); }
+        } catch (err) {
+            console.error('[AeroApp] handleAddEmployee:', err);
+            this.showToast('Failed to save employee: ' + (err.message || String(err)), 'danger');
+        }
     },
 
     openEditEmployeeModal: function(id) {
@@ -1912,11 +2060,8 @@ const AeroApp = {
         this._setButtonLoading(btn, true);
         try {
             await AeroDB.signUp(email, password, companyName);
-            document.getElementById('regStep2').style.display   = 'none';
-            document.getElementById('regSuccess').style.display = 'block';
-            document.getElementById('regHaveAccount').style.display = 'none';
-            const lbl = document.getElementById('regSuccessEmail');
-            if (lbl) lbl.textContent = `Confirmation sent to: ${email}`;
+            this.showToast('Account created — welcome to GlidePay!', 'success');
+            await this._loadStateAndNavigate();
         } catch (err) {
             this.showToast(err.message || 'Registration failed. Please try again.', 'danger');
         } finally {

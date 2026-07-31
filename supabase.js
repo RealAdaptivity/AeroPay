@@ -17,7 +17,15 @@
 const SUPABASE_URL  = 'https://ojvnxnlrghatkwjrlnop.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_4bJShv083TK7zHdk32fq5w_dJTAQ1nj';
 
-const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Pin schema to public — project PostgREST also exposes `api`, and clients that
+// omit Accept-Profile would otherwise hit api.* and fail with PGRST205.
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    db: { schema: 'public' },
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+    },
+});
 
 // ─────────────────────────────────────────────
 // INTERNAL HELPERS
@@ -26,8 +34,13 @@ const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 /** Throw a readable error if a Supabase call fails. */
 function _check(result, context) {
     if (result.error) {
-        console.error(`[AeroDB] ${context}:`, result.error.message);
-        throw new Error(`${context}: ${result.error.message}`);
+        const err = result.error;
+        const detail = err.message
+            || err.error_description
+            || err.details
+            || (typeof err === 'string' ? err : JSON.stringify(err));
+        console.error(`[AeroDB] ${context}:`, err);
+        throw new Error(`${context}: ${detail}`);
     }
     return result.data;
 }
@@ -124,6 +137,9 @@ function _toAppRun(run, lineItems = []) {
 // ─────────────────────────────────────────────
 const AeroDB = {
 
+    /** True while signUp is creating company rows — auth SIGNED_IN must wait. */
+    _signingUp: false,
+
     /**
      * Sign up a new company owner. Creates auth user, company row,
      * and company_users membership in one flow.
@@ -134,27 +150,32 @@ const AeroDB = {
      * @returns {{ user, company }}
      */
     async signUp(email, password, companyName) {
-        const { data: authData, error: authError } = await _sb.auth.signUp({ email, password });
-        if (authError) throw new Error(`Sign-up failed: ${authError.message}`);
+        this._signingUp = true;
+        try {
+            const { data: authData, error: authError } = await _sb.auth.signUp({ email, password });
+            if (authError) throw new Error(`Sign-up failed: ${authError.message}`);
 
-        const user = authData.user;
+            const user = authData.user;
 
-        // Create company
-        const company = _check(
-            await _sb.from('companies').insert({ name: companyName, owner_id: user.id }).select().single(),
-            'signUp → create company'
-        );
+            // Create company
+            const company = _check(
+                await _sb.from('companies').insert({ name: companyName, owner_id: user.id }).select().single(),
+                'signUp → create company'
+            );
 
-        // Create company_users record
-        _check(
-            await _sb.from('company_users').insert({ company_id: company.id, user_id: user.id, role: 'owner' }),
-            'signUp → company_users'
-        );
+            // Create company_users record
+            _check(
+                await _sb.from('company_users').insert({ company_id: company.id, user_id: user.id, role: 'owner' }),
+                'signUp → company_users'
+            );
 
-        // Bootstrap integration settings row
-        await _sb.from('integrations').insert({ company_id: company.id }).maybeSingle();
+            // Bootstrap integration settings row
+            await _sb.from('integrations').insert({ company_id: company.id }).maybeSingle();
 
-        return { user, company };
+            return { user, company };
+        } finally {
+            this._signingUp = false;
+        }
     },
 
     /**
@@ -194,22 +215,36 @@ const AeroDB = {
 
     /** Fetch the company record for the logged-in user. */
     async getCompany() {
-        const data = _check(
-            await _sb.from('companies').select('*').single(),
-            'getCompany'
-        );
-        return {
-            id:                       data.id,
-            name:                     data.name,
-            ein:                      data.ein,
-            bankName:                 data.bank_name,
-            routingNumber:            data.routing_number,
-            accountNumber:            data.account_number,
-            paymentType:              data.payment_type,
-            stripeAccountId:          data.stripe_account_id          || '',
-            stripeAccountStatus:      data.stripe_account_status       || 'not_created',
-            stripeFinancialAccountId: data.stripe_financial_account_id || '',
-        };
+        const user = await this.getUser();
+        if (!user) throw new Error('getCompany: not signed in');
+
+        // Retry briefly — signup can race ahead of the companies insert
+        // when auth fires SIGNED_IN before company rows exist.
+        let lastErr;
+        for (let attempt = 0; attempt < 8; attempt++) {
+            const result = await _sb.from('companies').select('*').eq('owner_id', user.id).maybeSingle();
+            if (result.error) {
+                lastErr = result.error;
+            } else if (result.data) {
+                const data = result.data;
+                return {
+                    id:                       data.id,
+                    name:                     data.name,
+                    ein:                      data.ein,
+                    bankName:                 data.bank_name,
+                    routingNumber:            data.routing_number,
+                    accountNumber:            data.account_number,
+                    paymentType:              data.payment_type,
+                    setupComplete:            !!data.setup_complete,
+                    setupStep:                data.setup_step || 1,
+                    stripeAccountId:          data.stripe_account_id          || '',
+                    stripeAccountStatus:      data.stripe_account_status       || 'not_created',
+                    stripeFinancialAccountId: data.stripe_financial_account_id || '',
+                };
+            }
+            await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
+        }
+        throw new Error(`getCompany: ${lastErr?.message || 'company not found for this account'}`);
     },
 
     /** Update company settings (EIN, bank details, name). */
@@ -271,11 +306,24 @@ const AeroDB = {
             'addEmployee'
         );
 
-        // Bootstrap PTO + benefits rows
-        await _sb.from('pto_balances').insert({ company_id: company.id, employee_id: row.id, vacation_hours: 0, sick_hours: 0, personal_hours: 0 });
-        await _sb.from('benefits').insert({ company_id: company.id, employee_id: row.id });
+        // Bootstrap PTO + benefits rows (non-fatal if policies block)
+        await Promise.allSettled([
+            _sb.from('pto_balances').insert({
+                company_id: company.id, employee_id: row.id,
+                vacation_hours: 0, sick_hours: 0, personal_hours: 0,
+            }),
+            _sb.from('benefits').insert({ company_id: company.id, employee_id: row.id }),
+        ]);
 
-        await this.addAuditLog('Employee Added', `Added ${emp.name} as ${emp.classification.toUpperCase()}`, 'employee');
+        try {
+            await this.addAuditLog(
+                'Employee Added',
+                `Added ${emp.name} as ${(emp.classification || '').toUpperCase()}`,
+                'employee'
+            );
+        } catch (e) {
+            console.warn('[AeroDB] addEmployee audit log skipped:', e.message || e);
+        }
 
         return _toAppEmployee(row);
     },
@@ -866,23 +914,37 @@ const AeroDB = {
         }));
     },
 
-    /** Add a new hire to the onboarding queue. */
+    /** Add a new hire to the onboarding queue. Returns the created hire in app shape. */
     async addToOnboarding(hire) {
         const company = await this.getCompany();
-        _check(
+        const row = _check(
             await _sb.from('onboarding_queue').insert({
                 company_id:  company.id,
                 name:        hire.name,
                 email:       hire.email,
                 role:        hire.role,
                 department:  hire.department,
-                start_date:  hire.startDate,
-                status:      'pending-docs',
+                start_date:  hire.startDate || null,
+                status:      hire.status || 'pending-docs',
                 step:        1,
                 total_steps: 5,
-            }),
+            }).select().single(),
             'addToOnboarding'
         );
+        await this.addAuditLog('New Hire Added', `Added ${hire.name} to onboarding queue`, 'employee').catch(() => {});
+        return {
+            id:         row.id,
+            name:       row.name,
+            email:      row.email,
+            role:       row.role,
+            department: row.department,
+            startDate:  row.start_date
+                ? new Date(row.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                : '',
+            status:     row.status,
+            step:       row.step,
+            totalSteps: row.total_steps,
+        };
     },
 
     /** Advance or update a hire's onboarding step/status. */
@@ -1144,6 +1206,8 @@ const AeroDB = {
                 routingNumber: company.routingNumber  || '',
                 accountNumber: company.accountNumber  || '',
                 paymentType:   company.paymentType    || 'direct_deposit',
+                setupComplete: company.setupComplete  || false,
+                setupStep:     company.setupStep      || 1,
             },
             employees,
             payrollHistory,

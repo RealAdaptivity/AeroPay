@@ -3699,29 +3699,33 @@ function get1099NECHTML(employee, state) {
 
 // A. Employee Onboarding View
 function renderOnboardingView(state) {
+    const queue = state.onboardingQueue || [];
     const statusColors = { 'in-progress': 'primary', 'pending-docs': 'warning', 'complete': 'success', 'cancelled': 'danger' };
     const statusLabels = { 'in-progress': 'In Progress', 'pending-docs': 'Pending Docs', 'complete': 'Complete', 'cancelled': 'Cancelled' };
 
     let queueRows = '';
-    state.onboardingQueue.forEach(h => {
-        const pct = Math.round((h.step / h.totalSteps) * 100);
+    queue.forEach(h => {
+        const total = h.totalSteps || 5;
+        const step = h.step || 1;
+        const pct = Math.round((step / total) * 100);
         const color = statusColors[h.status] || 'primary';
+        const initials = (h.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2);
         queueRows += `
             <tr>
                 <td>
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <div class="employee-avatar" style="width:36px;height:36px;font-size:13px;">${h.name.split(' ').map(n=>n[0]).join('')}</div>
+                        <div class="employee-avatar" style="width:36px;height:36px;font-size:13px;">${initials}</div>
                         <div><div style="font-weight:600;">${h.name}</div><div style="font-size:12px;color:var(--text-tertiary);">${h.email}</div></div>
                     </div>
                 </td>
-                <td><span style="font-weight:600;">${h.role}</span><br/><span style="font-size:12px;color:var(--text-tertiary);">${h.department}</span></td>
-                <td><span style="font-weight:600;">${h.startDate}</span></td>
+                <td><span style="font-weight:600;">${h.role || ''}</span><br/><span style="font-size:12px;color:var(--text-tertiary);">${h.department || ''}</span></td>
+                <td><span style="font-weight:600;">${h.startDate || 'TBD'}</span></td>
                 <td>
                     <div style="width:120px;">
                         <div style="height:6px;background:var(--bg-tertiary);border-radius:var(--radius-full);overflow:hidden;">
                             <div style="height:100%;width:${pct}%;background:var(--${color});border-radius:var(--radius-full);transition:width 0.4s;"></div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Step ${h.step} of ${h.totalSteps} (${pct}%)</div>
+                        <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Step ${step} of ${total} (${pct}%)</div>
                     </div>
                 </td>
                 <td><span class="badge badge-${color}">${statusLabels[h.status] || h.status}</span></td>
@@ -3735,7 +3739,7 @@ function renderOnboardingView(state) {
         <div class="card" style="margin-bottom:24px; padding:20px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, var(--primary) 0%, #6366f1 100%); color:#fff;">
             <div>
                 <div style="font-size:20px; font-weight:800; font-family:var(--font-heading);">New Hire Onboarding</div>
-                <div style="font-size:13px; opacity:0.85; margin-top:4px;">${state.onboardingQueue.length} active new hires in pipeline</div>
+                <div style="font-size:13px; opacity:0.85; margin-top:4px;">${queue.length} active new hires in pipeline</div>
             </div>
             <button class="btn" style="background:rgba(255,255,255,0.2); color:#fff; border:1px solid rgba(255,255,255,0.4); backdrop-filter:blur(8px);" onclick="AeroApp.openNewHireForm()">
                 <svg style="width:16px;height:16px;margin-right:6px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"></path></svg>
@@ -3746,17 +3750,17 @@ function renderOnboardingView(state) {
         <div class="grid-stats" style="margin-bottom:24px;">
             <div class="card stat-card">
                 <span class="stat-label">Active Onboarding</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='in-progress').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='in-progress').length}</span>
                 <span class="stat-trend up">In progress</span>
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Pending Documents</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='pending-docs').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='pending-docs').length}</span>
                 <span class="stat-trend" style="color:var(--warning)">Awaiting signatures</span>
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Completed (YTD)</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='complete').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='complete').length}</span>
                 <span class="stat-trend up">Successfully hired</span>
             </div>
         </div>
