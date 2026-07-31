@@ -914,23 +914,37 @@ const AeroDB = {
         }));
     },
 
-    /** Add a new hire to the onboarding queue. */
+    /** Add a new hire to the onboarding queue. Returns the created hire in app shape. */
     async addToOnboarding(hire) {
         const company = await this.getCompany();
-        _check(
+        const row = _check(
             await _sb.from('onboarding_queue').insert({
                 company_id:  company.id,
                 name:        hire.name,
                 email:       hire.email,
                 role:        hire.role,
                 department:  hire.department,
-                start_date:  hire.startDate,
-                status:      'pending-docs',
+                start_date:  hire.startDate || null,
+                status:      hire.status || 'pending-docs',
                 step:        1,
                 total_steps: 5,
-            }),
+            }).select().single(),
             'addToOnboarding'
         );
+        await this.addAuditLog('New Hire Added', `Added ${hire.name} to onboarding queue`, 'employee').catch(() => {});
+        return {
+            id:         row.id,
+            name:       row.name,
+            email:      row.email,
+            role:       row.role,
+            department: row.department,
+            startDate:  row.start_date
+                ? new Date(row.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                : '',
+            status:     row.status,
+            step:       row.step,
+            totalSteps: row.total_steps,
+        };
     },
 
     /** Advance or update a hire's onboarding step/status. */
