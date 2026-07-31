@@ -511,14 +511,33 @@ function renderDashboardView(state) {
     const completedRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
     const ytdGross = completedRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
     const ytdTax = completedRuns.reduce((sum, run) => sum + run.employerTaxes, 0);
-    
+    const ap = state.settings?.autopilot || {
+        enabled: false, mode: 'reminder', frequency: 'biweekly',
+        dayOfWeek: 5, dayOfMonth: 1, nextRun: null, lastRun: null, reminderDaysBefore: 2,
+    };
+    const nextRunIso = typeof computeNextAutopilotRun === 'function' ? computeNextAutopilotRun(ap) : ap.nextRun;
+    const daysLeft = typeof daysUntilDate === 'function' ? daysUntilDate(nextRunIso) : null;
+    const nextRunLabel = nextRunIso
+        ? new Date(nextRunIso + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        : null;
+    const modeLabel = ap.mode === 'auto_submit' ? 'auto-submit for approval' : 'send a reminder';
+    const freqLabel = ({ weekly: 'weekly', biweekly: 'biweekly', semimonthly: 'semi-monthly', monthly: 'monthly' })[ap.frequency] || ap.frequency;
+    const bannerTitle = ap.enabled ? 'Smart Autopilot Enabled' : 'Smart Autopilot Off';
+    const bannerDesc = ap.enabled
+        ? (daysLeft === 0
+            ? `Next ${freqLabel} payroll is today (${nextRunLabel}). GlidePay will ${modeLabel}.`
+            : daysLeft != null
+                ? `Next ${freqLabel} payroll in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${nextRunLabel}). GlidePay will ${modeLabel}.`
+                : `GlidePay will ${modeLabel} on your ${freqLabel} schedule.`)
+        : 'Turn on Autopilot to schedule reminders or auto-submit payroll runs on your pay cadence.';
+
     return `
         <div class="autopilot-banner">
             <div class="autopilot-details">
-                <span class="autopilot-title">Smart Autopilot Enabled</span>
-                <span class="autopilot-desc">GlidePay is set to auto-process your next payroll in 6 days. Standard deductions and timesheet hours will be synced automatically.</span>
+                <span class="autopilot-title">${bannerTitle}</span>
+                <span class="autopilot-desc">${bannerDesc}</span>
             </div>
-            <button class="btn btn-primary" onclick="AeroApp.showToast('Autopilot options configured!', 'success')">Configure</button>
+            <button class="btn btn-primary" onclick="AeroApp.openAutopilotConfig()">Configure</button>
         </div>
 
         <div class="grid-stats">
@@ -1615,11 +1634,20 @@ function renderSettingsView(state) {
     const connectStatus = state.settings?.stripeAccountStatus || 'not_created';
     const faId          = state.settings?.stripeFinancialAccountId || '';
     const accountId     = state.settings?.stripeAccountId || '';
+    const requirements  = state.settings?.stripeRequirementsDue || [];
+    const detailsSubmitted = !!state.settings?.stripeDetailsSubmitted;
+
+    const reqList = requirements.length
+        ? `<ul style="margin:8px 0 0 18px;font-size:12px;color:var(--text-secondary);">
+            ${requirements.slice(0, 8).map(r => `<li style="margin-bottom:2px;"><code>${r}</code></li>`).join('')}
+            ${requirements.length > 8 ? `<li>…and ${requirements.length - 8} more</li>` : ''}
+           </ul>`
+        : '';
 
     return `
         <!-- Treasury / ACH Onboarding Card -->
         <div class="card" style="padding:32px; max-width:800px; margin-bottom:24px;">
-            <div class="section-title" style="margin-bottom:4px;">
+            <div class="section-title" style="margin-bottom:4px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
                 <span>ACH Direct Deposit — Stripe Connect</span>
                 ${_connectStatusBadge(connectStatus)}
             </div>
@@ -1629,25 +1657,40 @@ function renderSettingsView(state) {
 
             ${connectStatus === 'not_created' ? `
             <div style="display:flex; gap:12px; align-items:flex-start; background:var(--bg-secondary); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:16px;">
-                <div style="font-size:20px;">🏦</div>
                 <div>
                     <p style="font-weight:600; margin:0 0 4px;">Activate ACH Payroll Disbursements</p>
-                    <p style="font-size:13px; color:var(--text-secondary); margin:0;">Stripe will verify your business identity (KYB) — typically takes 1–2 business days. Your employees can link bank accounts once onboarding is complete.</p>
+                    <p style="font-size:13px; color:var(--text-secondary); margin:0;">Stripe will verify your business identity (KYB). Your employees can link bank accounts once onboarding is complete.</p>
                 </div>
             </div>
             <button class="btn btn-primary" onclick="AeroApp.startConnectOnboarding()">Start Stripe Onboarding</button>
             ` : connectStatus === 'pending_onboarding' ? `
-            <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">Onboarding has been started but is not yet complete. Click below to continue where you left off.</p>
-            <button class="btn btn-primary" onclick="AeroApp.startConnectOnboarding()">Continue Onboarding</button>
+            <div style="background:var(--bg-secondary); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:16px;">
+                <p style="font-weight:600; margin:0 0 4px;">${detailsSubmitted ? 'Additional information required' : 'Onboarding in progress'}</p>
+                <p style="font-size:13px; color:var(--text-secondary); margin:0;">
+                    ${detailsSubmitted
+                        ? 'Your Stripe connected account is saved, but Stripe still needs more details before ACH/Treasury can activate.'
+                        : 'Onboarding has been started. Continue where you left off — your connected account is already linked to this company.'}
+                </p>
+                ${accountId ? `<p style="font-size:12px;color:var(--text-tertiary);margin:10px 0 0;font-family:monospace;">Account: ${accountId}</p>` : ''}
+                ${reqList}
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="AeroApp.startConnectOnboarding()">Continue Onboarding</button>
+                <button class="btn btn-outline" onclick="AeroApp.syncConnectStatus()">Refresh Status</button>
+            </div>
             ` : connectStatus === 'pending_verification' ? `
-            <p style="font-size:13px; color:var(--text-secondary);">Onboarding submitted — Stripe is reviewing your business information. This typically takes 1–2 business days. You'll be notified once capabilities are approved.</p>
+            <div style="background:var(--bg-secondary); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); margin-bottom:16px;">
+                <p style="font-size:13px; color:var(--text-secondary); margin:0;">Onboarding submitted — Stripe is reviewing your business information and activating Treasury/ACH capabilities. This typically takes 1–2 business days.</p>
+                ${accountId ? `<p style="font-size:12px;color:var(--text-tertiary);margin:10px 0 0;font-family:monospace;">Account: ${accountId}</p>` : ''}
+            </div>
+            <button class="btn btn-outline" onclick="AeroApp.syncConnectStatus()">Refresh Status</button>
             ` : `
             <div style="display:flex; flex-direction:column; gap:8px; font-size:13px; color:var(--text-secondary);">
-                <div style="display:flex; justify-content:space-between;">
+                <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
                     <span>Connected Account</span>
                     <span style="font-weight:600; color:var(--text-primary); font-family:monospace;">${accountId}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between;">
+                <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
                     <span>Treasury Financial Account</span>
                     <span style="font-weight:600; color:var(--text-primary); font-family:monospace;">${faId || '—'}</span>
                 </div>
@@ -1659,6 +1702,9 @@ function renderSettingsView(state) {
                     <span>ACH Cutoff (same-day)</span>
                     <span style="font-weight:600; color:var(--text-primary);">1:00 PM ET</span>
                 </div>
+            </div>
+            <div style="margin-top:16px;">
+                <button class="btn btn-outline" onclick="AeroApp.syncConnectStatus()">Refresh Status</button>
             </div>
             `}
         </div>

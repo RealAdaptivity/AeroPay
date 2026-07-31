@@ -317,8 +317,8 @@ const AeroApp = {
             if (typeof AeroBilling !== 'undefined') {
                 AeroBilling.renderBillingBanner();
                 AeroBilling.handleCheckoutReturn();
-                this._handleConnectReturn();
             }
+            await this._handleConnectReturn();
         } catch (err) {
             console.error('[AeroApp] Failed to load state:', err);
             this.showToast('Failed to load company data. Please refresh.', 'danger');
@@ -341,18 +341,80 @@ const AeroApp = {
 
     saveStateToStorage: function() {}, // no-op — all persistence via AeroDB
 
-    _handleConnectReturn: function() {
+    _handleConnectReturn: async function() {
         const params = new URLSearchParams(window.location.search);
         const connect = params.get('connect');
         if (!connect) return;
-        window.history.replaceState({}, '', window.location.pathname);
+        window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         if (connect === 'return') {
-            this.showToast('Stripe onboarding submitted! Capability verification may take a few minutes.', 'success');
-            setTimeout(() => this._refreshState(), 4000);
+            this.showToast('Syncing Stripe onboarding status…', 'info');
+            try {
+                await this.syncConnectStatus({ navigate: true });
+            } catch (err) {
+                console.error('[Connect] sync after return failed:', err);
+                await this._refreshState();
+                this.navigateTo('settings');
+                this.showToast('Returned from Stripe — open Settings to refresh status.', 'warning');
+            }
         } else if (connect === 'refresh') {
             this.showToast('Onboarding link expired — restarting.', 'info');
             this.startConnectOnboarding();
         }
+    },
+
+    /**
+     * Pull live Connect status from Stripe (via stripe-connect get_status),
+     * update local settings, and optionally jump to Settings.
+     */
+    syncConnectStatus: async function({ navigate = false } = {}) {
+        const session = await _sb.auth.getSession();
+        const token   = session.data?.session?.access_token;
+        if (!token) throw new Error('Not signed in');
+
+        const resp = await fetch(CONNECT_FUNCTION_URL, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body:    JSON.stringify({ action: 'get_status' }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to sync Connect status');
+        }
+        const data = await resp.json();
+
+        // Refresh full state so settings.stripe* come from DB after edge function writes
+        await this._refreshState();
+
+        // Overlay fresh edge response in case refresh raced ahead of the write
+        this.state.settings = {
+            ...this.state.settings,
+            stripeAccountStatus:      data.status || this.state.settings?.stripeAccountStatus || 'not_created',
+            stripeAccountId:          data.accountId || this.state.settings?.stripeAccountId || '',
+            stripeFinancialAccountId: data.financialAccountId || this.state.settings?.stripeFinancialAccountId || '',
+            stripeRequirementsDue:    data.requirementsDue || [],
+            stripeDetailsSubmitted:   !!data.detailsSubmitted,
+        };
+
+        if (navigate) this.navigateTo('settings');
+
+        const status = this.state.settings.stripeAccountStatus;
+        if (status === 'active') {
+            this.showToast('Stripe Connect is active — ACH disbursements are ready.', 'success');
+        } else if (status === 'pending_verification') {
+            this.showToast('Onboarding submitted — Stripe is still verifying capabilities.', 'info');
+        } else if (status === 'pending_onboarding') {
+            const due = (data.requirementsDue || []).length;
+            this.showToast(
+                due
+                    ? `Stripe account saved. ${due} item${due === 1 ? '' : 's'} still required — continue onboarding.`
+                    : 'Stripe account saved. Continue onboarding to finish verification.',
+                'warning'
+            );
+        } else {
+            this.showToast('Stripe Connect is not set up yet.', 'info');
+        }
+
+        return data;
     },
 
     // ─── Setup Wizard ────────────────────────────────────────────
@@ -1999,6 +2061,125 @@ const AeroApp = {
             await AeroDB.addAuditLog('Settings Updated', 'Company settings saved', 'settings');
             this.showToast('Company accounting settings updated successfully.', 'success');
         } catch (err) { this.showToast('Failed to save settings: ' + err.message, 'danger'); }
+    },
+
+    openAutopilotConfig: function() {
+        const ap = this.state.settings?.autopilot || {
+            enabled: false, mode: 'reminder', frequency: 'biweekly',
+            dayOfWeek: 5, dayOfMonth: 1, nextRun: null, reminderDaysBefore: 2,
+        };
+        const nextRun = computeNextAutopilotRun(ap);
+        const showWeekday = ap.frequency === 'weekly' || ap.frequency === 'biweekly';
+        const showMonthDay = ap.frequency === 'monthly' || ap.frequency === 'semimonthly';
+        const weekdays = [
+            { v: 1, l: 'Monday' }, { v: 2, l: 'Tuesday' }, { v: 3, l: 'Wednesday' },
+            { v: 4, l: 'Thursday' }, { v: 5, l: 'Friday' },
+        ];
+
+        const body = `
+            <form id="autopilotForm" onsubmit="AeroApp.saveAutopilotConfig(event)">
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">
+                    Schedule when GlidePay reminds you — or auto-submits a payroll run for approval — on your pay cadence.
+                </p>
+
+                <label style="display:flex;align-items:center;gap:12px;margin-bottom:20px;cursor:pointer;">
+                    <input type="checkbox" id="apEnabled" ${ap.enabled ? 'checked' : ''}
+                        style="width:18px;height:18px;cursor:pointer;"
+                        onchange="document.getElementById('apOptions').style.opacity=this.checked?'1':'0.45';">
+                    <span style="font-weight:600;">Enable Smart Autopilot</span>
+                </label>
+
+                <div id="apOptions" style="opacity:${ap.enabled ? '1' : '0.45'};">
+                    <div class="form-grid" style="margin-bottom:8px;">
+                        <div class="form-group">
+                            <label for="apFrequency">Pay Frequency</label>
+                            <select class="form-control" id="apFrequency" onchange="AeroApp._autopilotFreqChanged()">
+                                <option value="weekly" ${ap.frequency === 'weekly' ? 'selected' : ''}>Weekly</option>
+                                <option value="biweekly" ${ap.frequency === 'biweekly' ? 'selected' : ''}>Biweekly</option>
+                                <option value="semimonthly" ${ap.frequency === 'semimonthly' ? 'selected' : ''}>Semi-monthly</option>
+                                <option value="monthly" ${ap.frequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="apDayOfWeekGroup" style="${showWeekday ? '' : 'display:none;'}">
+                            <label for="apDayOfWeek">Payday</label>
+                            <select class="form-control" id="apDayOfWeek">
+                                ${weekdays.map(d => `<option value="${d.v}" ${ap.dayOfWeek === d.v ? 'selected' : ''}>${d.l}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group" id="apDayOfMonthGroup" style="${showMonthDay ? '' : 'display:none;'}">
+                            <label for="apDayOfMonth">Day of Month</label>
+                            <input type="number" class="form-control" id="apDayOfMonth" min="1" max="28" value="${ap.dayOfMonth || 1}">
+                            <span style="font-size:11px;color:var(--text-tertiary);">Semi-monthly also schedules a second payday ~15 days later.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="apMode">Autopilot Action</label>
+                            <select class="form-control" id="apMode">
+                                <option value="reminder" ${ap.mode === 'reminder' ? 'selected' : ''}>Remind me before payday</option>
+                                <option value="auto_submit" ${ap.mode === 'auto_submit' ? 'selected' : ''}>Auto-submit for approval</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="apReminderDays">Lead Time (days before payday)</label>
+                            <input type="number" class="form-control" id="apReminderDays" min="0" max="14" value="${ap.reminderDaysBefore ?? 2}">
+                        </div>
+                        <div class="form-group">
+                            <label for="apNextRun">Next Run Date</label>
+                            <input type="date" class="form-control" id="apNextRun" value="${nextRun || ''}">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:24px;">
+                    <button type="button" class="btn btn-outline" onclick="AeroApp.closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Autopilot</button>
+                </div>
+            </form>`;
+
+        this.openModal('Smart Autopilot', body);
+    },
+
+    _autopilotFreqChanged: function() {
+        const freq = document.getElementById('apFrequency')?.value;
+        const showWeekday = freq === 'weekly' || freq === 'biweekly';
+        const showMonthDay = freq === 'monthly' || freq === 'semimonthly';
+        const weekGroup = document.getElementById('apDayOfWeekGroup');
+        const monthGroup = document.getElementById('apDayOfMonthGroup');
+        if (weekGroup) weekGroup.style.display = showWeekday ? '' : 'none';
+        if (monthGroup) monthGroup.style.display = showMonthDay ? '' : 'none';
+    },
+
+    saveAutopilotConfig: async function(e) {
+        e.preventDefault();
+        const enabled = document.getElementById('apEnabled').checked;
+        const frequency = document.getElementById('apFrequency').value;
+        const mode = document.getElementById('apMode').value;
+        const dayOfWeek = parseInt(document.getElementById('apDayOfWeek').value, 10);
+        const dayOfMonth = Math.min(28, Math.max(1, parseInt(document.getElementById('apDayOfMonth').value, 10) || 1));
+        const reminderDaysBefore = Math.min(14, Math.max(0, parseInt(document.getElementById('apReminderDays').value, 10) || 0));
+        let nextRun = document.getElementById('apNextRun').value || null;
+
+        const draft = {
+            enabled,
+            mode,
+            frequency,
+            dayOfWeek,
+            dayOfMonth,
+            reminderDaysBefore,
+            nextRun: null,
+            lastRun: this.state.settings?.autopilot?.lastRun || null,
+        };
+        if (!nextRun) nextRun = computeNextAutopilotRun(draft);
+        draft.nextRun = nextRun;
+
+        try {
+            await AeroDB.saveAutopilotSettings(draft);
+            this.state.settings = { ...this.state.settings, autopilot: draft };
+            this.closeModal();
+            this.showToast(enabled ? 'Autopilot settings saved.' : 'Autopilot turned off.', 'success');
+            if (this.currentView === 'dashboard') this.navigateTo('dashboard');
+        } catch (err) {
+            this.showToast('Failed to save autopilot: ' + err.message, 'danger');
+        }
     },
 
     /**

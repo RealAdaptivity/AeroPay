@@ -114,23 +114,91 @@ async function handleGetStatus(userId: string) {
     const company = await getCompanyForUser(userId);
 
     if (!company.stripe_account_id) {
-        return json({ status: "not_created", capabilities: {}, hasFinancialAccount: false });
+        return json({ status: "not_created", capabilities: {}, hasFinancialAccount: false, requirementsDue: [] });
     }
 
-    const account = await stripe.accounts.retrieve(company.stripe_account_id);
+    const account = await stripe.accounts.retrieve(company.stripe_account_id as string);
     const caps    = account.capabilities ?? {};
+    const newStatus = deriveConnectStatus(account);
+
+    // Persist live Stripe status so Settings reflects onboarding even if webhooks lag
+    const updates: Record<string, string> = {};
+    if (company.stripe_account_status !== newStatus) {
+        updates.stripe_account_status = newStatus;
+    }
+
+    // Auto-create financial account once fully active
+    if (newStatus === "active" && !company.stripe_financial_account_id) {
+        try {
+            const fa = await stripe.treasury.financialAccounts.create(
+                {
+                    supported_currencies: ["usd"],
+                    features: {
+                        inbound_transfers:   { ach: { requested: true } },
+                        outbound_transfers:  { ach: { requested: true } },
+                        outbound_payments:   { us_bank_account: { requested: true } },
+                        financial_addresses: { aba: { requested: true } },
+                    },
+                },
+                { stripeAccount: company.stripe_account_id as string },
+            );
+            updates.stripe_financial_account_id = fa.id;
+            updates.stripe_account_status = "active";
+
+            await supabase.from("audit_log").insert({
+                company_id:  company.id,
+                actor_label: "System",
+                action:      "Treasury Financial Account Created",
+                details:     `Financial account ${fa.id} created while syncing Connect status`,
+                category:    "settings",
+            });
+        } catch (err) {
+            console.error(`[stripe-connect] FA create on get_status:`, (err as Error).message);
+        }
+    }
+
+    if (Object.keys(updates).length) {
+        await supabase.from("companies").update(updates).eq("id", company.id);
+    }
+
+    const financialAccountId =
+        updates.stripe_financial_account_id ||
+        (company.stripe_financial_account_id as string | null) ||
+        null;
 
     return json({
-        status:             company.stripe_account_status,
+        status:              updates.stripe_account_status || company.stripe_account_status || newStatus,
+        accountId:           company.stripe_account_id,
+        detailsSubmitted:    !!account.details_submitted,
         capabilities: {
             treasury:                     caps.treasury,
             us_bank_account_ach_payments: caps.us_bank_account_ach_payments,
             transfers:                    caps.transfers,
         },
-        requirementsDue:    account.requirements?.currently_due ?? [],
-        hasFinancialAccount: !!company.stripe_financial_account_id,
-        financialAccountId:  company.stripe_financial_account_id ?? null,
+        requirementsDue:     [
+            ...(account.requirements?.currently_due ?? []),
+            ...(account.requirements?.past_due ?? []),
+        ],
+        hasFinancialAccount: !!financialAccountId,
+        financialAccountId,
     });
+}
+
+/** Mirror webhook status derivation so UI/DB stay consistent without waiting on webhooks. */
+function deriveConnectStatus(account: Stripe.Account): string {
+    const caps = account.capabilities ?? {};
+    const treasuryActive = caps.treasury === "active";
+    const achActive      = caps.us_bank_account_ach_payments === "active";
+    const due = [
+        ...(account.requirements?.currently_due ?? []),
+        ...(account.requirements?.past_due ?? []),
+    ];
+    const onboardingDone = due.length === 0 && !!account.details_submitted;
+
+    if (onboardingDone && treasuryActive && achActive) return "active";
+    if (onboardingDone) return "pending_verification";
+    if (account.details_submitted || account.id) return "pending_onboarding";
+    return "not_created";
 }
 
 // ── Create Financial Account ──────────────────────────────────────────────────

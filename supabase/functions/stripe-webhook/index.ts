@@ -280,14 +280,19 @@ async function handleAccountUpdated(account: Stripe.Account) {
     const caps           = account.capabilities ?? {};
     const treasuryActive = caps.treasury === "active";
     const achActive      = caps.us_bank_account_ach_payments === "active";
-    const requirementsDue = account.requirements?.currently_due ?? [];
-    const onboardingDone  = requirementsDue.length === 0;
+    const due = [
+        ...(account.requirements?.currently_due ?? []),
+        ...(account.requirements?.past_due ?? []),
+    ];
+    const onboardingDone  = due.length === 0 && !!account.details_submitted;
 
     let newStatus = "pending_onboarding";
     if (onboardingDone && treasuryActive && achActive) {
         newStatus = "active";
     } else if (onboardingDone) {
         newStatus = "pending_verification";
+    } else if (account.details_submitted || account.id) {
+        newStatus = "pending_onboarding";
     }
 
     await supabase.from("companies")
