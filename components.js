@@ -507,9 +507,10 @@ function renderSetupWizardView(state, step) {
 
 // 1. Render Dashboard
 function renderDashboardView(state) {
-    // Calculate total spend YTD
-    const ytdGross = state.payrollHistory.reduce((sum, run) => sum + run.grossPayroll, 0);
-    const ytdTax = state.payrollHistory.reduce((sum, run) => sum + run.employerTaxes, 0);
+    // Calculate total spend YTD (approved/completed runs only)
+    const completedRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
+    const ytdGross = completedRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
+    const ytdTax = completedRuns.reduce((sum, run) => sum + run.employerTaxes, 0);
     
     return `
         <div class="autopilot-banner">
@@ -668,21 +669,29 @@ function renderDashboardView(state) {
                         </tr>
                     </thead>
                     <tbody>
-                        ${state.payrollHistory.map(run => `
+                        ${state.payrollHistory.map(run => {
+                            const statusMap = {
+                                pending:   { badge: 'warning', label: 'Pending Approval' },
+                                rejected:  { badge: 'danger',  label: 'Rejected' },
+                                completed: { badge: 'success', label: 'Deposited' },
+                                approved:  { badge: 'success', label: 'Approved' },
+                            };
+                            const st = statusMap[run.status] || { badge: 'success', label: 'Deposited' };
+                            return `
                             <tr>
                                 <td style="font-weight:600;">${run.date}</td>
                                 <td>${run.employeeCount} employees</td>
                                 <td>${formatCurrency(run.grossPayroll)}</td>
                                 <td>${formatCurrency(run.employerTaxes)}</td>
                                 <td style="font-weight:700;color:var(--primary);">${formatCurrency(run.totalCost)}</td>
-                                <td><span class="badge badge-success">Deposited</span></td>
+                                <td><span class="badge badge-${st.badge}">${st.label}</span></td>
                                 <td>
                                     <button class="btn btn-sm-icon" onclick="AeroApp.showPayrollHistoryDetails('${run.id}')" title="View Details">
                                         <svg style="width:16px;height:16px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                     </button>
                                 </td>
-                            </tr>
-                        `).join('')}
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -925,7 +934,7 @@ function renderRunPayrollView(state) {
                         Back
                     </button>
                     <button class="btn btn-success" onclick="AeroApp.submitPayrollRun()">
-                        Submit Payroll
+                        Submit for Approval
                         <svg style="width:16px;height:16px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"></path></svg>
                     </button>
                 </div>
@@ -1921,8 +1930,8 @@ function getPaystubHTML(employee, calcDetails, dateRange) {
 
 // 9. Generate Mock Form 941
 function getForm941HTML(state) {
-    // Aggregated numbers from all processed payroll history
-    const allRuns = state.payrollHistory;
+    // Aggregated numbers from completed/approved payroll history
+    const allRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
     const grossWages = allRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
     const fitWithheld = allRuns.reduce((sum, run) => sum + (run.grossPayroll * 0.12), 0); // Est 12% average FIT
     const ssEmployee = allRuns.reduce((sum, run) => sum + (run.grossPayroll * 0.062), 0);
@@ -3726,29 +3735,33 @@ function get1099NECHTML(employee, state) {
 
 // A. Employee Onboarding View
 function renderOnboardingView(state) {
+    const queue = state.onboardingQueue || [];
     const statusColors = { 'in-progress': 'primary', 'pending-docs': 'warning', 'complete': 'success', 'cancelled': 'danger' };
     const statusLabels = { 'in-progress': 'In Progress', 'pending-docs': 'Pending Docs', 'complete': 'Complete', 'cancelled': 'Cancelled' };
 
     let queueRows = '';
-    state.onboardingQueue.forEach(h => {
-        const pct = Math.round((h.step / h.totalSteps) * 100);
+    queue.forEach(h => {
+        const total = h.totalSteps || 5;
+        const step = h.step || 1;
+        const pct = Math.round((step / total) * 100);
         const color = statusColors[h.status] || 'primary';
+        const initials = (h.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2);
         queueRows += `
             <tr>
                 <td>
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <div class="employee-avatar" style="width:36px;height:36px;font-size:13px;">${h.name.split(' ').map(n=>n[0]).join('')}</div>
+                        <div class="employee-avatar" style="width:36px;height:36px;font-size:13px;">${initials}</div>
                         <div><div style="font-weight:600;">${h.name}</div><div style="font-size:12px;color:var(--text-tertiary);">${h.email}</div></div>
                     </div>
                 </td>
-                <td><span style="font-weight:600;">${h.role}</span><br/><span style="font-size:12px;color:var(--text-tertiary);">${h.department}</span></td>
-                <td><span style="font-weight:600;">${h.startDate}</span></td>
+                <td><span style="font-weight:600;">${h.role || ''}</span><br/><span style="font-size:12px;color:var(--text-tertiary);">${h.department || ''}</span></td>
+                <td><span style="font-weight:600;">${h.startDate || 'TBD'}</span></td>
                 <td>
                     <div style="width:120px;">
                         <div style="height:6px;background:var(--bg-tertiary);border-radius:var(--radius-full);overflow:hidden;">
                             <div style="height:100%;width:${pct}%;background:var(--${color});border-radius:var(--radius-full);transition:width 0.4s;"></div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Step ${h.step} of ${h.totalSteps} (${pct}%)</div>
+                        <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Step ${step} of ${total} (${pct}%)</div>
                     </div>
                 </td>
                 <td><span class="badge badge-${color}">${statusLabels[h.status] || h.status}</span></td>
@@ -3762,7 +3775,7 @@ function renderOnboardingView(state) {
         <div class="card" style="margin-bottom:24px; padding:20px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, var(--primary) 0%, #6366f1 100%); color:#fff;">
             <div>
                 <div style="font-size:20px; font-weight:800; font-family:var(--font-heading);">New Hire Onboarding</div>
-                <div style="font-size:13px; opacity:0.85; margin-top:4px;">${state.onboardingQueue.length} active new hires in pipeline</div>
+                <div style="font-size:13px; opacity:0.85; margin-top:4px;">${queue.length} active new hires in pipeline</div>
             </div>
             <button class="btn" style="background:rgba(255,255,255,0.2); color:#fff; border:1px solid rgba(255,255,255,0.4); backdrop-filter:blur(8px);" onclick="AeroApp.openNewHireForm()">
                 <svg style="width:16px;height:16px;margin-right:6px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"></path></svg>
@@ -3773,17 +3786,17 @@ function renderOnboardingView(state) {
         <div class="grid-stats" style="margin-bottom:24px;">
             <div class="card stat-card">
                 <span class="stat-label">Active Onboarding</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='in-progress').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='in-progress').length}</span>
                 <span class="stat-trend up">In progress</span>
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Pending Documents</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='pending-docs').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='pending-docs').length}</span>
                 <span class="stat-trend" style="color:var(--warning)">Awaiting signatures</span>
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Completed (YTD)</span>
-                <span class="stat-value">${state.onboardingQueue.filter(h=>h.status==='complete').length}</span>
+                <span class="stat-value">${queue.filter(h=>h.status==='complete').length}</span>
                 <span class="stat-trend up">Successfully hired</span>
             </div>
         </div>
@@ -4008,14 +4021,17 @@ function renderBenefitsAdminView(state) {
 // E. Payroll Approvals View
 function renderApprovalsView(state) {
     const statusColors = { pending: 'warning', approved: 'success', rejected: 'danger' };
+    const approvals = state.payrollApprovals || [];
+    const advances  = state.payAdvances || [];
 
     let rows = '';
-    [...state.payrollApprovals].reverse().forEach(appr => {
-        const run = state.payrollHistory.find(r => r.id === appr.runId);
+    [...approvals].reverse().forEach(appr => {
+        const run = (state.payrollHistory || []).find(r => r.id === appr.runId);
         const statusColor = statusColors[appr.status] || 'primary';
+        const shortId = String(appr.runId || appr.id).slice(0, 8).toUpperCase();
         rows += `
             <tr>
-                <td style="font-weight:600;">${appr.runId.toUpperCase()}</td>
+                <td style="font-weight:600;">${shortId}</td>
                 <td>${run ? run.date : '—'}</td>
                 <td>${appr.employeeCount} employees</td>
                 <td style="font-weight:700;">${formatCurrency(appr.totalAmount)}</td>
@@ -4032,8 +4048,8 @@ function renderApprovalsView(state) {
             </tr>`;
     });
 
-    const pendingCount = state.payrollApprovals.filter(a=>a.status==='pending').length;
-    const approvedTotal = state.payrollApprovals.filter(a=>a.status==='approved').reduce((s,a)=>s+a.totalAmount,0);
+    const pendingCount = approvals.filter(a=>a.status==='pending').length;
+    const approvedTotal = approvals.filter(a=>a.status==='approved').reduce((s,a)=>s+a.totalAmount,0);
 
     return `
         <div class="grid-stats" style="margin-bottom:24px;">
@@ -4044,7 +4060,7 @@ function renderApprovalsView(state) {
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Approved Payrolls (YTD)</span>
-                <span class="stat-value">${state.payrollApprovals.filter(a=>a.status==='approved').length}</span>
+                <span class="stat-value">${approvals.filter(a=>a.status==='approved').length}</span>
                 <span class="stat-trend up">Processed runs</span>
             </div>
             <div class="card stat-card">
@@ -4054,10 +4070,10 @@ function renderApprovalsView(state) {
             </div>
         </div>
         ${(() => {
-            const pendingAdvances = state.payAdvances.filter(a => a.status === 'pending');
+            const pendingAdvances = advances.filter(a => a.status === 'pending');
             let advanceRows = '';
             pendingAdvances.forEach(adv => {
-                const emp = state.employees.find(e => e.id === adv.empId);
+                const emp = (state.employees || []).find(e => e.id === adv.empId);
                 advanceRows += `
                     <tr>
                         <td style="padding: 12px 24px;">
@@ -4511,6 +4527,121 @@ function renderEmployee401kView(state, employeeId) {
         </div>`;
 }
 
+function renderHelpDocsView(state) {
+    const company = state?.settings?.companyName || 'your company';
+    const sections = [
+        {
+            id: 'getting-started',
+            title: 'Getting started',
+            body: `
+                <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Complete company setup (legal name, EIN, funding bank).</li>
+                    <li>Subscribe on the billing banner if prompted.</li>
+                    <li>Open <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('settings');" style="color:var(--primary);font-weight:600;">Settings</a> and start Stripe Connect onboarding for ACH.</li>
+                    <li>Add employees under <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('employees');" style="color:var(--primary);font-weight:600;">Employees</a> or <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('onboarding');" style="color:var(--primary);font-weight:600;">Onboarding</a>.</li>
+                    <li>Run payroll when ready — submit for approval before ACH fires.</li>
+                </ol>`
+        },
+        {
+            id: 'payroll',
+            title: 'Running payroll',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 12px;line-height:1.6;">Use <strong>Run Payroll</strong> for a three-step cycle: enter hours → review taxes → submit.</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Hourly staff pull hours from Time Tracking; salaried staff use period rates.</li>
+                    <li>Submit sends the run to <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('approvals');" style="color:var(--primary);font-weight:600;">Approvals</a> as pending.</li>
+                    <li>Approve a run to mark it completed and initiate ACH for linked bank accounts.</li>
+                    <li>History and pay stubs live on the Dashboard and employee portal.</li>
+                </ul>`
+        },
+        {
+            id: 'ach-connect',
+            title: 'ACH & Stripe Connect',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 12px;line-height:1.6;">GlidePay uses Stripe Connect + Treasury to pay employees via ACH.</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Settings → <strong>Start / Continue Stripe Onboarding</strong> (KYB for ${company}).</li>
+                    <li>Status flow: Onboarding Required → Under Review → Active.</li>
+                    <li>If status looks stuck, use <strong>Refresh Status</strong> after returning from Stripe.</li>
+                    <li>Employees link their own bank accounts from the employee portal.</li>
+                    <li>New employee bank accounts may have a short security hold before the first transfer.</li>
+                </ul>`
+        },
+        {
+            id: 'employees',
+            title: 'Employees & onboarding',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>W-2 vs 1099 classification drives tax withholding and forms.</li>
+                    <li>Set pay type (hourly/salaried), frequency, state, and benefits on each profile.</li>
+                    <li>Onboarding tracks new-hire steps and document collection.</li>
+                    <li>Garnishments and pay advances are managed from employee records / Approvals.</li>
+                </ul>`
+        },
+        {
+            id: 'tax',
+            title: 'Tax & compliance',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li><a href="#" onclick="event.preventDefault();AeroApp.navigateTo('tax-compliance');" style="color:var(--primary);font-weight:600;">Tax Compliance</a> covers Form 941, W-2, and 1099 previews.</li>
+                    <li>You can mark filings as filed manually, or transmit when an e-file provider is connected.</li>
+                    <li>Employees can view/sign W-2s from their Documents area.</li>
+                </ul>`
+        },
+        {
+            id: 'billing',
+            title: 'Billing & plans',
+            body: `
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>GlidePay bills a base subscription plus per-seat pricing.</li>
+                    <li>Use the billing banner to start Checkout or open the customer portal.</li>
+                    <li>ACH Connect onboarding is separate from subscription billing.</li>
+                </ul>`
+        },
+        {
+            id: 'support',
+            title: 'Support',
+            body: `
+                <p style="font-size:14px;color:var(--text-secondary);margin:0 0 8px;line-height:1.6;">Need help with ${company}'s account?</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;font-size:14px;color:var(--text-secondary);">
+                    <li>Email <a href="mailto:support@glidepay.org" style="color:var(--primary);font-weight:600;">support@glidepay.org</a></li>
+                    <li>Review the <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('audit-log');" style="color:var(--primary);font-weight:600;">Audit Log</a> for recent system actions.</li>
+                    <li>Legal: <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('privacy-policy');" style="color:var(--primary);font-weight:600;">Privacy Policy</a> · <a href="#" onclick="event.preventDefault();AeroApp.navigateTo('terms-of-service');" style="color:var(--primary);font-weight:600;">Terms of Service</a></li>
+                </ul>`
+        },
+    ];
+
+    const toc = sections.map(s => `
+        <a href="#help-${s.id}" style="display:block;padding:8px 0;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;border-bottom:1px solid var(--border-color);">
+            ${s.title}
+        </a>`).join('');
+
+    const articles = sections.map(s => `
+        <div class="card" id="help-${s.id}" style="padding:24px;margin-bottom:16px;scroll-margin-top:24px;">
+            <div class="section-title" style="margin-bottom:12px;">${s.title}</div>
+            ${s.body}
+        </div>`).join('');
+
+    return `
+        <div class="help-docs-layout" style="display:grid;grid-template-columns:minmax(200px,240px) 1fr;gap:24px;align-items:start;">
+            <div class="card help-docs-toc" style="padding:20px 24px;position:sticky;top:16px;">
+                <div class="section-title" style="margin-bottom:8px;">Topics</div>
+                <p style="font-size:12px;color:var(--text-tertiary);margin:0 0 8px;">Jump to a guide</p>
+                ${toc}
+            </div>
+            <div>
+                <div class="card" style="padding:24px;margin-bottom:16px;background:linear-gradient(135deg, rgba(79,70,229,0.06), rgba(14,165,233,0.06));border:1px solid var(--border-color);">
+                    <div class="section-title" style="margin-bottom:8px;">GlidePay Help Center</div>
+                    <p style="font-size:14px;color:var(--text-secondary);margin:0;line-height:1.6;">
+                        Short guides for the screens you use every pay cycle. Prefer email? Reach us at
+                        <a href="mailto:support@glidepay.org" style="color:var(--primary);font-weight:600;">support@glidepay.org</a>.
+                    </p>
+                </div>
+                ${articles}
+            </div>
+        </div>`;
+}
+
 // Export UI Renderers
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -4546,6 +4677,7 @@ if (typeof module !== 'undefined' && module.exports) {
         renderAuditLogView,
         renderEmployeePTOView,
         renderEmployeeBenefitsView,
-        renderEmployee401kView
+        renderEmployee401kView,
+        renderHelpDocsView
     };
 }
