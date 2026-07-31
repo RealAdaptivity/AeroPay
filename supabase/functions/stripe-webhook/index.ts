@@ -83,11 +83,15 @@ serve(async (req: Request) => {
                 break;
 
             case "treasury.outbound_transfer.posted":
+            case "treasury.outbound_payment.posted":
                 await handleOutboundTransfer(event.data.object as any, "succeeded");
                 break;
 
             case "treasury.outbound_transfer.failed":
             case "treasury.outbound_transfer.returned":
+            case "treasury.outbound_payment.failed":
+            case "treasury.outbound_payment.returned":
+            case "treasury.outbound_payment.canceled":
                 await handleOutboundTransfer(event.data.object as any, "failed");
                 break;
 
@@ -276,12 +280,12 @@ async function handleOutboundTransfer(transfer: any, status: "succeeded" | "fail
             company_id:  companyId,
             actor_label: "Stripe",
             action:      status === "succeeded" ? "ACH Transfer Sent" : "ACH Transfer Failed",
-            details:     `OutboundTransfer ${transfer.id} — $${((transfer.amount ?? 0) / 100).toFixed(2)} — ${status}`,
+            details:     `ACH payout ${transfer.id} — $${((transfer.amount ?? 0) / 100).toFixed(2)} — ${status}`,
             category:    "payroll",
         });
     }
 
-    console.log(`[webhook] OutboundTransfer ${transfer.id} → ${status}`);
+    console.log(`[webhook] ACH payout ${transfer.id} → ${status}`);
 }
 
 /**
