@@ -2282,6 +2282,8 @@ const AeroApp = {
                 this.showToast(`E-file failed: ${res.statusDetail || 'provider error'}`, 'danger');
             } else if (res.status === 'accepted') {
                 this.showToast(`${formType} accepted by ${agency} ✓`, 'success');
+            } else if (res.statusDetail && /Already filed/i.test(res.statusDetail)) {
+                this.showToast(res.statusDetail, 'success');
             } else {
                 this.showToast(`${formType} submitted — awaiting ${agency} acknowledgement.`, 'success');
                 if (res.submissionId) this.pollEfileStatus(res.submissionId, formRef);

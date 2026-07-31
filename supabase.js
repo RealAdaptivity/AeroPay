@@ -1251,7 +1251,9 @@ const AeroDB = {
         // A configured=false body means no provider is connected yet — surface it
         // to the caller rather than treating it as a hard failure.
         if (!resp.ok && data.configured !== false) {
-            throw new Error(data.error || `E-file request failed (${resp.status})`);
+            // Prefer TaxBandit/provider detail over a bare HTTP status (e.g. legacy 502).
+            const detail = data.statusDetail || data.status_detail || data.error;
+            throw new Error(detail || `E-file request failed (${resp.status})`);
         }
         return data;
     },
