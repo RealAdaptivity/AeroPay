@@ -209,6 +209,16 @@ const AeroDB = {
             stripeAccountId:          data.stripe_account_id          || '',
             stripeAccountStatus:      data.stripe_account_status       || 'not_created',
             stripeFinancialAccountId: data.stripe_financial_account_id || '',
+            autopilot: {
+                enabled:             !!data.auto_payroll_enabled,
+                mode:                data.auto_payroll_mode || 'reminder',
+                frequency:           data.auto_payroll_frequency || 'biweekly',
+                dayOfWeek:           data.auto_payroll_day_of_week ?? 5,
+                dayOfMonth:          data.auto_payroll_day_of_month ?? 1,
+                nextRun:             data.auto_payroll_next_run || null,
+                lastRun:             data.auto_payroll_last_run || null,
+                reminderDaysBefore:  data.auto_payroll_reminder_days_before ?? 2,
+            },
         };
     },
 
@@ -224,6 +234,30 @@ const AeroDB = {
                 payment_type:   fields.paymentType,
             }).eq('owner_id', (await this.getUser()).id),
             'saveCompany'
+        );
+    },
+
+    /** Persist Smart Autopilot / auto-payroll schedule settings. */
+    async saveAutopilotSettings(ap) {
+        _check(
+            await _sb.from('companies').update({
+                auto_payroll_enabled:               !!ap.enabled,
+                auto_payroll_mode:                  ap.mode || 'reminder',
+                auto_payroll_frequency:             ap.frequency || 'biweekly',
+                auto_payroll_day_of_week:           ap.dayOfWeek ?? 5,
+                auto_payroll_day_of_month:          ap.dayOfMonth ?? 1,
+                auto_payroll_next_run:              ap.nextRun || null,
+                auto_payroll_reminder_days_before:  ap.reminderDaysBefore ?? 2,
+            }).eq('owner_id', (await this.getUser()).id),
+            'saveAutopilotSettings'
+        );
+
+        await this.addAuditLog(
+            'Autopilot Updated',
+            ap.enabled
+                ? `Autopilot enabled (${ap.frequency}, ${ap.mode})`
+                : 'Autopilot disabled',
+            'settings'
         );
     },
 
@@ -1144,6 +1178,16 @@ const AeroDB = {
                 routingNumber: company.routingNumber  || '',
                 accountNumber: company.accountNumber  || '',
                 paymentType:   company.paymentType    || 'direct_deposit',
+                autopilot:     company.autopilot || {
+                    enabled: false,
+                    mode: 'reminder',
+                    frequency: 'biweekly',
+                    dayOfWeek: 5,
+                    dayOfMonth: 1,
+                    nextRun: null,
+                    lastRun: null,
+                    reminderDaysBefore: 2,
+                },
             },
             employees,
             payrollHistory,
@@ -1178,4 +1222,56 @@ function _getMondayOfCurrentWeek() {
     const diff = (day === 0) ? -6 : 1 - day;
     d.setDate(d.getDate() + diff);
     return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Compute the next auto-payroll run date from schedule settings.
+ * dayOfWeek uses JS getDay() (0=Sun … 5=Fri … 6=Sat).
+ */
+function computeNextAutopilotRun(ap, fromDate = new Date()) {
+    const start = new Date(fromDate);
+    start.setHours(12, 0, 0, 0);
+    const toISO = (d) => d.toISOString().slice(0, 10);
+
+    if (ap.nextRun) {
+        const existing = new Date(ap.nextRun + 'T12:00:00');
+        if (!Number.isNaN(existing.getTime()) && existing >= start) return ap.nextRun;
+    }
+
+    const freq = ap.frequency || 'biweekly';
+    const targetDow = ap.dayOfWeek ?? 5;
+    const dayOfMonth = Math.min(Math.max(ap.dayOfMonth ?? 1, 1), 28);
+
+    if (freq === 'monthly') {
+        const candidate = new Date(start.getFullYear(), start.getMonth(), dayOfMonth, 12);
+        if (candidate < start) candidate.setMonth(candidate.getMonth() + 1);
+        return toISO(candidate);
+    }
+
+    if (freq === 'semimonthly') {
+        const y = start.getFullYear();
+        const m = start.getMonth();
+        const first  = new Date(y, m, Math.min(dayOfMonth, 14), 12);
+        const second = new Date(y, m, Math.min(dayOfMonth + 15, 28), 12);
+        const upcoming = [first, second].filter(d => d >= start).sort((a, b) => a - b);
+        if (upcoming.length) return toISO(upcoming[0]);
+        return toISO(new Date(y, m + 1, Math.min(dayOfMonth, 14), 12));
+    }
+
+    // weekly / biweekly — next matching weekday (including today)
+    const d = new Date(start);
+    while (d.getDay() !== targetDow) d.setDate(d.getDate() + 1);
+    if (ap.lastRun === toISO(d)) {
+        d.setDate(d.getDate() + (freq === 'biweekly' ? 14 : 7));
+    }
+    return toISO(d);
+}
+
+/** Days from today until ISO date (0 if today/past). */
+function daysUntilDate(isoDate) {
+    if (!isoDate) return null;
+    const target = new Date(isoDate + 'T12:00:00');
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    return Math.max(0, Math.round((target - today) / 86400000));
 }
