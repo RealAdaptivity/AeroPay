@@ -1,5 +1,5 @@
 /**
- * Automated Verification Check for AeroPay Payroll Calculation Engine
+ * Automated Verification Check for GlidePay Payroll Calculation Engine
  */
 
 const { calculatePayroll } = require('./payroll-engine.js');
@@ -13,7 +13,7 @@ function assertEqual(actual, expected, description) {
     }
 }
 
-console.log("Starting AeroPay Payroll Engine Verification Checks...\n");
+console.log("Starting GlidePay Payroll Engine Verification Checks...\n");
 
 // Test Case 1: Salaried Employee, Married Jointly, CA resident, $125k/yr
 const employee1 = {
