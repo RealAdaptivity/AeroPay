@@ -302,6 +302,33 @@ const AeroDB = {
         return _toAppEmployee(data);
     },
 
+    /**
+     * Company-admin memberships (owner/admin), newest / Stripe-ready first.
+     * Role "employee" in company_users does NOT count as company login access.
+     */
+    async getCompanyAdminMemberships() {
+        const user = await this.getUser();
+        if (!user) return [];
+        const { data, error } = await _sb
+            .from('company_users')
+            .select('company_id, role, created_at, companies(*)')
+            .eq('user_id', user.id)
+            .in('role', ['owner', 'admin'])
+            .order('created_at', { ascending: false });
+        if (error || !data?.length) return [];
+        return [...data].sort((a, b) => {
+            const score = (row) => {
+                const c = row.companies || {};
+                let s = 0;
+                if (c.stripe_account_id) s += 4;
+                if (c.stripe_account_status === 'active') s += 2;
+                if (c.setup_complete) s += 1;
+                return s;
+            };
+            return score(b) - score(a);
+        });
+    },
+
     /** Fetch the company record for the logged-in owner, admin, or invited employee. */
     async getCompany() {
         const user = await this.getUser();

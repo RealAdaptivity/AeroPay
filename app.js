@@ -282,19 +282,63 @@ const AeroApp = {
 
     _loadStateAndNavigate: async function() {
         try {
-            this.state = await AeroDB.loadFullState();
             const user = await AeroDB.getUser();
-            // Prefer direct portal link — multi-company users may load the wrong
-            // company roster and miss themselves in state.employees.
-            let empRecord = this.state.employees.find(e => e.userId === user.id);
-            if (!empRecord && typeof AeroDB.getMyEmployeeRecord === 'function') {
-                empRecord = await AeroDB.getMyEmployeeRecord();
-                if (empRecord && !this.state.employees.some(e => e.id === empRecord.id)) {
-                    this.state.employees = [...this.state.employees, empRecord];
+            if (!user) return;
+
+            // Login tab sets this; page refresh leaves it unset → infer from memberships.
+            const intent = sessionStorage.getItem('aeropay_login_role');
+            sessionStorage.removeItem('aeropay_login_role');
+
+            const empRecord = (typeof AeroDB.getMyEmployeeRecord === 'function')
+                ? await AeroDB.getMyEmployeeRecord()
+                : null;
+            const adminMemberships = (typeof AeroDB.getCompanyAdminMemberships === 'function')
+                ? await AeroDB.getCompanyAdminMemberships()
+                : [];
+            const hasCompanyAdmin = adminMemberships.length > 0;
+
+            let mode = null; // 'employee' | 'company'
+            if (intent === 'employee') {
+                if (!empRecord) {
+                    this.showToast('No Employee Portal access for this account. Ask your admin to invite you, or use the Company tab.', 'warning');
+                    await AeroDB.signOut();
+                    return;
+                }
+                mode = 'employee';
+            } else if (intent === 'company') {
+                if (!hasCompanyAdmin) {
+                    if (empRecord) {
+                        this.showToast('That account is for the Employee Portal — use the Employee tab to sign in.', 'warning');
+                    } else {
+                        this.showToast('No company admin access for this account. Register a company or use the Employee tab.', 'warning');
+                    }
+                    await AeroDB.signOut();
+                    return;
+                }
+                mode = 'company';
+            } else {
+                // Session restore: company admin wins only when they are not also a portal employee
+                // of a different active employer. Otherwise prefer the portal if that was last used.
+                const lastMode = localStorage.getItem('aeropay_last_mode');
+                if (lastMode === 'employee' && empRecord) mode = 'employee';
+                else if (lastMode === 'company' && hasCompanyAdmin) mode = 'company';
+                else if (hasCompanyAdmin && !empRecord) mode = 'company';
+                else if (empRecord) mode = 'employee';
+                else if (hasCompanyAdmin) mode = 'company';
+                else {
+                    this.showToast('This account has no company or employee portal access.', 'danger');
+                    await AeroDB.signOut();
+                    return;
                 }
             }
 
-            if (empRecord) {
+            localStorage.setItem('aeropay_last_mode', mode);
+
+            if (mode === 'employee') {
+                this.state = await AeroDB.loadFullState();
+                if (empRecord && !this.state.employees.some(e => e.id === empRecord.id)) {
+                    this.state.employees = [...this.state.employees, empRecord];
+                }
                 this.session = {
                     isLoggedIn: true,
                     role: 'employee',
@@ -304,6 +348,7 @@ const AeroApp = {
                 };
                 this.navigateTo('employee-dashboard');
             } else {
+                this.state = await AeroDB.loadFullState();
                 this.session = {
                     isLoggedIn: true,
                     role: 'company',
@@ -321,9 +366,9 @@ const AeroApp = {
                     this.navigateTo('dashboard');
                 }
             }
+
             this.populateW2Selectors();
             if (typeof AeroBilling !== 'undefined') {
-                // Employees never see subscription / free-trial banners.
                 if (this.session?.role !== 'employee') {
                     AeroBilling.renderBillingBanner();
                     AeroBilling.handleCheckoutReturn();
@@ -2688,8 +2733,15 @@ const AeroApp = {
         if (!email || !pass) { this.showToast('Please enter your email and password.', 'warning'); return; }
         this._setButtonLoading(btn, true);
         try {
+            // Remember which tab was used — auth callback must not auto-route
+            // employee accounts into the portal when they used the Company tab
+            // (or vice versa).
+            sessionStorage.setItem('aeropay_login_role', role === 'employee' ? 'employee' : 'company');
             await AeroDB.signIn(email, pass);
+            // Loading state clears when navigate away; reset if still on landing.
+            setTimeout(() => this._setButtonLoading(btn, false), 2500);
         } catch (err) {
+            sessionStorage.removeItem('aeropay_login_role');
             this.showToast(err.message || 'Invalid credentials.', 'danger');
             this._setButtonLoading(btn, false);
         }
