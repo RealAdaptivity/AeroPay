@@ -322,6 +322,11 @@ const AeroApp = {
         } catch (err) {
             console.error('[AeroApp] Failed to load state:', err);
             this.showToast('Failed to load company data. Please refresh.', 'danger');
+            // If we have a session but load failed (e.g. transient race), offer a soft retry
+            setTimeout(() => {
+                if (AeroDB._signingUp) return;
+                this._loadStateAndNavigate().catch(() => {});
+            }, 800);
         }
     },
 
@@ -822,13 +827,17 @@ const AeroApp = {
         };
         try {
             const created = await AeroDB.addEmployee(newEmp);
+            if (!this.state.employees) this.state.employees = [];
             this.state.employees.push(created);
             this.closeModal();
             this.showToast(`Successfully onboarded ${newEmp.name}`, 'success');
             if (this.setupStep === 2) { this.setupGoTo(2); } else { this.navigateTo('employees'); }
             this.populateW2Selectors();
             if (typeof AeroBilling !== 'undefined') AeroBilling.updateSeatCount(this.state.employees.length);
-        } catch (err) { this.showToast('Failed to save employee: ' + err.message, 'danger'); }
+        } catch (err) {
+            console.error('[AeroApp] handleAddEmployee:', err);
+            this.showToast('Failed to save employee: ' + (err.message || String(err)), 'danger');
+        }
     },
 
     openEditEmployeeModal: function(id) {

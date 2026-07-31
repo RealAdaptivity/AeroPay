@@ -17,7 +17,15 @@
 const SUPABASE_URL  = 'https://ojvnxnlrghatkwjrlnop.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_4bJShv083TK7zHdk32fq5w_dJTAQ1nj';
 
-const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Pin schema to public — project PostgREST also exposes `api`, and clients that
+// omit Accept-Profile would otherwise hit api.* and fail with PGRST205.
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    db: { schema: 'public' },
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+    },
+});
 
 // ─────────────────────────────────────────────
 // INTERNAL HELPERS
@@ -26,8 +34,13 @@ const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 /** Throw a readable error if a Supabase call fails. */
 function _check(result, context) {
     if (result.error) {
-        console.error(`[AeroDB] ${context}:`, result.error.message);
-        throw new Error(`${context}: ${result.error.message}`);
+        const err = result.error;
+        const detail = err.message
+            || err.error_description
+            || err.details
+            || (typeof err === 'string' ? err : JSON.stringify(err));
+        console.error(`[AeroDB] ${context}:`, err);
+        throw new Error(`${context}: ${detail}`);
     }
     return result.data;
 }
@@ -293,11 +306,24 @@ const AeroDB = {
             'addEmployee'
         );
 
-        // Bootstrap PTO + benefits rows
-        await _sb.from('pto_balances').insert({ company_id: company.id, employee_id: row.id, vacation_hours: 0, sick_hours: 0, personal_hours: 0 });
-        await _sb.from('benefits').insert({ company_id: company.id, employee_id: row.id });
+        // Bootstrap PTO + benefits rows (non-fatal if policies block)
+        await Promise.allSettled([
+            _sb.from('pto_balances').insert({
+                company_id: company.id, employee_id: row.id,
+                vacation_hours: 0, sick_hours: 0, personal_hours: 0,
+            }),
+            _sb.from('benefits').insert({ company_id: company.id, employee_id: row.id }),
+        ]);
 
-        await this.addAuditLog('Employee Added', `Added ${emp.name} as ${emp.classification.toUpperCase()}`, 'employee');
+        try {
+            await this.addAuditLog(
+                'Employee Added',
+                `Added ${emp.name} as ${(emp.classification || '').toUpperCase()}`,
+                'employee'
+            );
+        } catch (e) {
+            console.warn('[AeroDB] addEmployee audit log skipped:', e.message || e);
+        }
 
         return _toAppEmployee(row);
     },
