@@ -147,13 +147,13 @@ function _formatApprovalTs(iso) {
 
 /**
  * Map payroll_runs into the payrollApprovals shape expected by renderApprovalsView.
- * pending → pending; rejected → rejected; completed/other → approved.
+ * pending_approval → pending; rejected/failed → rejected; completed/other → approved.
  */
 function _runsToApprovals(runs, userIdToLabel = {}) {
     return runs.map(run => {
         let status = 'approved';
-        if (run.status === 'pending') status = 'pending';
-        else if (run.status === 'rejected') status = 'rejected';
+        if (run.status === 'pending' || run.status === 'pending_approval') status = 'pending';
+        else if (run.status === 'rejected' || run.status === 'failed') status = 'rejected';
 
         const submittedLabel = userIdToLabel[run.submittedBy] || 'Admin';
         const approvedLabel  = run.approvedBy
@@ -564,14 +564,14 @@ const AeroDB = {
         const company = await this.getCompany();
         const user    = await this.getUser();
 
-        // Insert the run header — pending until Approvals tab confirms
+        // Insert the run header — pending_approval until Approvals tab confirms
         const run = _check(
             await _sb.from('payroll_runs').insert({
                 company_id:     company.id,
                 run_date:       new Date().toISOString().slice(0, 10),
                 period_start:   runSummary.periodStart,
                 period_end:     runSummary.periodEnd,
-                status:         'pending',
+                status:         'pending_approval',
                 gross_payroll:  runSummary.grossPayroll,
                 employer_taxes: runSummary.employerTaxes,
                 total_cost:     runSummary.totalCost,
@@ -635,19 +635,18 @@ const AeroDB = {
     /** Approve a pending payroll run — marks completed and records approver. */
     async approvePayrollRun(runId) {
         const user = await this.getUser();
-        const run = _check(
-            await _sb.from('payroll_runs')
-                .update({
-                    status:      'completed',
-                    approved_by: user.id,
-                    approved_at: new Date().toISOString(),
-                })
-                .eq('id', runId)
-                .eq('status', 'pending')
-                .select()
-                .single(),
-            'approvePayrollRun'
-        );
+        // Accept legacy 'pending' if any rows somehow exist; DB constraint uses pending_approval.
+        const { data: updated, error: updErr } = await _sb.from('payroll_runs')
+            .update({
+                status:      'completed',
+                approved_by: user.id,
+                approved_at: new Date().toISOString(),
+            })
+            .eq('id', runId)
+            .in('status', ['pending_approval', 'pending', 'approved', 'processing'])
+            .select()
+            .single();
+        const run = _check({ data: updated, error: updErr }, 'approvePayrollRun');
 
         await this.addAuditLog(
             'Payroll Approved',
@@ -669,7 +668,7 @@ const AeroDB = {
                     approved_at: new Date().toISOString(),
                 })
                 .eq('id', runId)
-                .eq('status', 'pending')
+                .in('status', ['pending_approval', 'pending'])
                 .select()
                 .single(),
             'rejectPayrollRun'
