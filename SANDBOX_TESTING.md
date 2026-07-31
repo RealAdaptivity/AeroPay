@@ -21,10 +21,11 @@ Use the **GlidePay Test** sandbox. Create the webhook with a secret/restricted k
 
 ### Frontend (`config.js`)
 
-Sandbox publishable key is set for **GlidePay Test**. Fill in price IDs from that Dashboard (test mode):
+Sandbox publishable key + price IDs are set for **GlidePay Test** (`acct_1TkoXCAsgAzfeB6D`):
 
-- Base $29/mo → `SANDBOX.priceBaseId`
-- Seat $4/mo with metadata `type=per_seat` → `SANDBOX.priceSeatId`
+- Base: `price_1TzIdaAsgAzfeB6DKeordaY7` ($29/mo)
+- Seat: `price_1TzIdbAsgAzfeB6D0GyWkgXK` ($4/mo, metadata `type=per_seat`)
+- Test webhook registered → `…/functions/v1/stripe-webhook` (Connect events on; Treasury events pending Treasury activation)
 
 When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
 

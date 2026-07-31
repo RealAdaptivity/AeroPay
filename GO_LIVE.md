@@ -10,9 +10,10 @@ Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh 
 |---|---|
 | Domain `glidepay.org` + HTTPS | Done (GitHub Pages) |
 | GlidePay rebrand (UI, emails, logos) | Done |
-| Sandbox publishable key (GlidePay Test) | In `config.js` |
-| Sandbox price IDs | Waiting — paste from GlidePay Test Dashboard |
-| Sandbox webhook endpoint | Needs secret key + webhook setup |
+| Sandbox publishable key (GlidePay Test) | Done |
+| Sandbox price IDs ($29 + $4/seat) | Done |
+| Sandbox webhook (subscriptions + account.updated) | Done |
+| Treasury events on webhook | Pending — enable Treasury in test Dashboard |
 | Supabase secrets / function deploy | Needs Supabase auth |
 | Live `pk_live` + live prices | Placeholders |
 | Treasury for platforms (live) | Apply in Dashboard after sandbox validation |
@@ -21,14 +22,16 @@ Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh 
 
 ## A. GlidePay Test sandbox
 
-Use the existing **GlidePay Test** Stripe sandbox (not the accidental claimable sandbox).
+Using **GlidePay Test** (`acct_1TkoXCAsgAzfeB6D`).
 
-`config.js` already has the GlidePay Test publishable key. Add the two price IDs from Dashboard → Products (test mode):
+| Resource | ID |
+|---|---|
+| Publishable key | in `config.js` |
+| Base price $29/mo | `price_1TzIdaAsgAzfeB6DKeordaY7` |
+| Seat price $4/mo | `price_1TzIdbAsgAzfeB6D0GyWkgXK` |
+| Webhook | `we_1TzIe4AsgAzfeB6D5DUtFuR5` → edge `stripe-webhook` |
 
-- Base $29/mo → `SANDBOX.priceBaseId`
-- Seat $4/mo (metadata `type=per_seat`) → `SANDBOX.priceSeatId`
-
-Enable Treasury in test mode: Dashboard → Treasury → Get started.
+**You still need:** Dashboard → **Treasury → Get started** (test mode). After that, add the three `treasury.outbound_transfer.*` events to the webhook.
 
 ---
 
