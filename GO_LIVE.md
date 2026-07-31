@@ -58,11 +58,11 @@ treasury.outbound_transfer.returned
 
 Enable **Send events from connected accounts**. Copy `whsec_…`.
 
-Or after claiming:
+Or with a secret/restricted key from GlidePay Test:
 
 ```bash
-export STRIPE_API_KEY=sk_test_…   # post-claim key
-bash scripts/setup-stripe.sh sandbox   # only if you need a fresh webhook; prices already exist
+export STRIPE_API_KEY=sk_test_…   # or rk_test_…
+bash scripts/setup-stripe.sh sandbox   # only if you need a fresh webhook; reuse existing prices if present
 ```
 
 ### 2. Supabase secrets (test keys)
@@ -151,7 +151,6 @@ Merge this PR so GitHub Pages serves GlidePay branding + sandbox keys + live pla
 - **Never commit** `sk_` / `rk_` / `whsec_` keys. Only `pk_` publishable keys belong in `config.js`.
 - Prefer [restricted API keys](https://docs.stripe.com/keys/restricted-api-keys) over full secret keys.
 - Old AeroPay live keys were removed from `config.js` — rotate them in the old Stripe account if that account still exists.
-- Secret values for the claimable sandbox are kept only in `.local/` (gitignored).
 
 ---
 

@@ -1,7 +1,7 @@
 # GlidePay — Sandbox Testing Guide
 ### Full end-to-end test of the Treasury ACH payroll disbursement flow
 
-See also [GO_LIVE.md](./GO_LIVE.md) for claim/cutover steps.
+See also [GO_LIVE.md](./GO_LIVE.md) for cutover steps.
 
 ---
 
@@ -13,7 +13,7 @@ Before testing locally you need:
 2. Your Stripe **test-mode keys** (`pk_test_…`, `sk_test_…`)
 3. Your Supabase project credentials
 
-A claimable sandbox was already provisioned with GlidePay products/prices and `config.js` SANDBOX keys filled in. **Claim it** (see GO_LIVE.md) before creating the webhook — claimable RAKs cannot register webhook endpoints.
+Use the **GlidePay Test** sandbox. Create the webhook with a secret/restricted key from that account (publishable keys cannot register webhooks).
 
 ---
 
@@ -198,9 +198,9 @@ Use the failure accounts to test webhook handling of `treasury.outbound_transfer
 
 ## Checklist
 
-- [ ] Claim sandbox / have full `sk_test_…` key
-- [ ] `config.js` SANDBOX keys filled in
-- [ ] Supabase secrets updated to `sk_test_…`
+- [ ] GlidePay Test `pk_test_…` in `config.js`
+- [ ] GlidePay Test price IDs in `config.js`
+- [ ] Supabase secrets updated to `sk_test_…` from GlidePay Test
 - [ ] DB migrations applied (`supabase db push`)
 - [ ] All edge functions deployed
 - [ ] Test webhook endpoint registered with "connected accounts" events enabled
