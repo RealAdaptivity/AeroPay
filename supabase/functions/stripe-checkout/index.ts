@@ -53,6 +53,13 @@ serve(async (req: Request) => {
 async function handleCheckout(userId: string, body: any) {
     const { companyId, companyName, employeeCount, priceBaseId, priceSeatId, successUrl, cancelUrl } = body;
 
+    if (!priceBaseId || String(priceBaseId).includes("REPLACE")
+        || !priceSeatId || String(priceSeatId).includes("REPLACE")) {
+        return json({
+            error: "Invalid Stripe price IDs (placeholders). Use sandbox prices or fill LIVE in config.js.",
+        }, 400);
+    }
+
     // Look up or create Stripe customer for this company
     let stripeCustomerId: string | undefined;
 

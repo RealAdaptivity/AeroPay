@@ -40,10 +40,13 @@ const AeroBilling = {
                 return;
             }
 
-            if (!PRICE_BASE_ID || PRICE_BASE_ID.includes("REPLACE")
-                || !PRICE_SEAT_ID || PRICE_SEAT_ID.includes("REPLACE")) {
+            // Resolve at click-time so config.js sandbox fallback always wins.
+            const priceBaseId = AeroConfig.priceBaseId;
+            const priceSeatId = AeroConfig.priceSeatId;
+            if (!priceBaseId || priceBaseId.includes("REPLACE")
+                || !priceSeatId || priceSeatId.includes("REPLACE")) {
                 AeroApp.showToast(
-                    "Billing is not configured yet (missing Stripe price IDs). Add ?sandbox=1 or set sandbox prices.",
+                    "Billing prices are not configured. Hard-refresh, or open with ?sandbox=1.",
                     "danger"
                 );
                 return;
@@ -63,8 +66,8 @@ const AeroBilling = {
                     companyId:     company.id,
                     companyName:   company.name,
                     employeeCount: Math.max(1, employeeCount),
-                    priceBaseId:   PRICE_BASE_ID,
-                    priceSeatId:   PRICE_SEAT_ID,
+                    priceBaseId,
+                    priceSeatId,
                     trialDays:     AeroConfig.trialDays ?? 14,
                     successUrl:    window.location.origin + window.location.pathname + "?checkout=success",
                     cancelUrl:     window.location.origin + window.location.pathname + "?checkout=canceled",
