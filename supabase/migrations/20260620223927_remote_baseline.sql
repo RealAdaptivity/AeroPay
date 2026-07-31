@@ -1,0 +1,1 @@
+-- Baseline stub: already applied on remote AeroPay project before repo migrations were tracked.
