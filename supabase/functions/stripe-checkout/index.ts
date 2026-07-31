@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe Checkout Edge Function
+ * GlidePay — Stripe Checkout Edge Function
  * supabase/functions/stripe-checkout/index.ts
  *
  * Deploy:

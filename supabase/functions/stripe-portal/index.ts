@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe Customer Portal Edge Function
+ * GlidePay — Stripe Customer Portal Edge Function
  * supabase/functions/stripe-portal/index.ts
  *
  * Deploy:

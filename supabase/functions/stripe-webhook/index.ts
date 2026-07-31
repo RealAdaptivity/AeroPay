@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe Webhook Handler
+ * GlidePay — Stripe Webhook Handler
  * Supabase Edge Function: supabase/functions/stripe-webhook/index.ts
  *
  * Deploy:

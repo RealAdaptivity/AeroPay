@@ -1,5 +1,7 @@
-# AeroPay — Sandbox Testing Guide
+# GlidePay — Sandbox Testing Guide
 ### Full end-to-end test of the Treasury ACH payroll disbursement flow
+
+See also [GO_LIVE.md](./GO_LIVE.md) for claim/cutover steps.
 
 ---
 
@@ -11,25 +13,20 @@ Before testing locally you need:
 2. Your Stripe **test-mode keys** (`pk_test_…`, `sk_test_…`)
 3. Your Supabase project credentials
 
+A claimable sandbox was already provisioned with GlidePay products/prices and `config.js` SANDBOX keys filled in. **Claim it** (see GO_LIVE.md) before creating the webhook — claimable RAKs cannot register webhook endpoints.
+
 ---
 
 ## Step 1 — Configure sandbox keys
 
 ### Frontend (`config.js`)
 
-Open `config.js` and fill in your test-mode values:
+Sandbox publishable key + price IDs are already set for the provisioned sandbox:
 
-```js
-const SANDBOX = {
-    stripePublishableKey: "pk_test_YOUR_KEY_HERE",
-    priceBaseId:          "price_YOUR_TEST_BASE_PRICE",
-    priceSeatId:          "price_YOUR_TEST_SEAT_PRICE",
-    // Edge function URLs are the same — secrets on Supabase side control live vs. test
-    ...
-};
-```
+- Base: `price_1TzHeRPUXh44gm6ZKVoY1k8O` ($29/mo)
+- Seat: `price_1TzHeRPUXh44gm6ZQPtrDRjk` ($4/mo, metadata `type=per_seat`)
 
-When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. No code change needed — just fill in the keys.
+When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
 
 ### Edge function secrets (Supabase)
 
@@ -46,13 +43,16 @@ supabase secrets set PLATFORM_FROM_EMAIL=onboarding@resend.dev
 
 > To restore live keys after testing: `supabase secrets set STRIPE_SECRET_KEY=sk_live_…`
 
-### Create test-mode prices in Stripe Dashboard
+Or use `bash scripts/set-supabase-secrets.sh sandbox` after exporting the two Stripe vars.
 
-Dashboard → Products (test mode) → Add product → Add two prices:
-- **Base**: $29.00 / month, recurring
-- **Per seat**: $4.00 / month, recurring — add metadata `type = per_seat`
+### Create test-mode prices (only if starting fresh)
 
-Copy the price IDs into `config.js` `SANDBOX.priceBaseId` / `SANDBOX.priceSeatId`.
+```bash
+export STRIPE_API_KEY=sk_test_…
+bash scripts/setup-stripe.sh sandbox
+```
+
+Dashboard path: Products (test mode) → Base $29/mo + Seat $4/mo with metadata `type = per_seat`.
 
 ---
 
@@ -62,10 +62,11 @@ Copy the price IDs into `config.js` `SANDBOX.priceBaseId` / `SANDBOX.priceSeatId
 supabase db push
 ```
 
-This applies all three migrations:
+This applies migrations including:
 - `20260624000000` — `ach_transfers` table, employee bank account columns
 - `20260624000001` — `stripe_account_id`, `stripe_account_status`, `stripe_financial_account_id` on companies
 - `20260624000002` — `bank_account_linked_at` on employees (3-day hold)
+- `20260702000000` — `tax_filing_submissions` for e-file
 
 ---
 
@@ -77,6 +78,7 @@ supabase functions deploy stripe-ach
 supabase functions deploy stripe-checkout
 supabase functions deploy stripe-portal
 supabase functions deploy stripe-webhook --no-verify-jwt
+supabase functions deploy file-tax
 ```
 
 ---
@@ -127,7 +129,7 @@ Copy the signing secret → `supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_�
    - Address: any US address
    - Owner DOB: `01/01/1901` (Stripe test bypass)
    - Owner SSN last 4: `0000`
-4. Submit → you'll be redirected back to AeroPay with `?connect=return`
+4. Submit → you'll be redirected back to GlidePay with `?connect=return`
 5. The `account.updated` webhook will fire; within ~30 seconds the status card should show **Active** and a Financial Account ID will appear
 
 > If the webhook doesn't fire within 1 minute, trigger it manually:
@@ -196,10 +198,11 @@ Use the failure accounts to test webhook handling of `treasury.outbound_transfer
 
 ## Checklist
 
+- [ ] Claim sandbox / have full `sk_test_…` key
 - [ ] `config.js` SANDBOX keys filled in
 - [ ] Supabase secrets updated to `sk_test_…`
 - [ ] DB migrations applied (`supabase db push`)
-- [ ] All 5 edge functions deployed
+- [ ] All edge functions deployed
 - [ ] Test webhook endpoint registered with "connected accounts" events enabled
 - [ ] Company onboarding completed → status shows **Active**
 - [ ] Employee bank account linked → audit log + alert email received

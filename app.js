@@ -1,5 +1,5 @@
 /**
- * AeroPay Core Orchestrator & State Manager
+ * GlidePay Core Orchestrator & State Manager
  */
 
 // Resolved from config.js — switches between sandbox and live automatically.
@@ -248,7 +248,8 @@ const DEFAULT_STATE = {
         { id: "onb-002", name: "Priya Nair", email: "p.nair@company.com", role: "Product Manager", department: "Product Design", startDate: "July 15, 2026", status: "pending-docs", step: 1, totalSteps: 5 }
     ],
     burnRateBudget: { monthly: 45000 },
-    splitDeposits: {}
+    splitDeposits: {},
+    taxFilings: []
 };
 
 const AeroApp = {
@@ -386,7 +387,7 @@ const AeroApp = {
             await _sb.from('companies').update({ setup_complete: true }).eq('id', company.id);
             this.state.settings.setupComplete = true;
             await AeroDB.addAuditLog('Setup Completed', 'First-run setup wizard completed', 'settings');
-            this.showToast('Setup complete — welcome to AeroPay! 🎉', 'success');
+            this.showToast('Setup complete — welcome to GlidePay! 🎉', 'success');
         } catch (_) {}
         this.navigateTo(destination === 'payroll' ? 'payroll' : 'dashboard');
     },
@@ -416,7 +417,7 @@ const AeroApp = {
 
     navigateTo: function(viewName) {
         // Enforce guest state limits (some views are public and viewable while logged out)
-        const publicViews = ['landing', 'privacy-policy'];
+        const publicViews = ['landing', 'privacy-policy', 'terms-of-service'];
         if (!publicViews.includes(viewName) && (!this.session || !this.session.isLoggedIn)) {
             viewName = 'landing';
         }
@@ -434,7 +435,7 @@ const AeroApp = {
         });
 
         // Update body class depending on route and session
-        if (viewName === 'landing' || viewName === 'setup' || viewName === 'privacy-policy') {
+        if (viewName === 'landing' || viewName === 'setup' || viewName === 'privacy-policy' || viewName === 'terms-of-service') {
             document.body.className = 'guest-mode';
         } else if (this.session && this.session.role === 'employee') {
             document.body.className = 'employee-mode';
@@ -457,7 +458,7 @@ const AeroApp = {
                 htmlContent = renderSetupWizardView(this.state, this.setupStep || 1);
                 break;
             case 'landing':
-                titleText = "Welcome to AeroPay";
+                titleText = "Welcome to GlidePay";
                 subtitleText = "Autonomous Payroll & Tax Engine";
                 htmlContent = renderLandingPageView(this.state);
                 break;
@@ -465,6 +466,11 @@ const AeroApp = {
                 titleText = "Privacy Policy";
                 subtitleText = "";
                 htmlContent = renderPrivacyPolicyView(this.state);
+                break;
+            case 'terms-of-service':
+                titleText = "Terms of Service";
+                subtitleText = "";
+                htmlContent = renderTermsOfServiceView(this.state);
                 break;
             case 'employee-dashboard':
                 const empForDash = this.state.employees.find(e => e.id === this.session.employeeId);
@@ -1521,6 +1527,97 @@ const AeroApp = {
         }
     },
 
+    // Forms that can be transmitted through the connected e-file provider.
+    EFILE_SUPPORTED_FORMS: ['Form 941', 'Form 940', 'W-2 / W-3', '1099-NEC'],
+
+    // Insert/replace a single e-file submission in local state (keyed by form_ref).
+    _setLocalFiling: function(formRef, filing) {
+        if (!this.state.taxFilings) this.state.taxFilings = [];
+        this.state.taxFilings = this.state.taxFilings.filter(f => f.form_ref !== formRef);
+        if (filing) this.state.taxFilings.unshift(filing);
+    },
+
+    /** Transmit a filing to the connected e-file provider. */
+    submitEfile: async function(formRef, formType, period, agency, amount) {
+        if (!window.confirm(
+            `E-file ${formType} for ${period} with ${agency} through your connected provider?\n\n` +
+            `This transmits the filing electronically.`
+        )) return;
+
+        // Optimistic "submitting" state so the row updates immediately.
+        this._setLocalFiling(formRef, { form_ref: formRef, form_type: formType, period, agency, amount, status: 'submitting' });
+        if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+        this.showToast(`Submitting ${formType} (${period})…`, 'info');
+
+        try {
+            const res = await AeroDB.submitEfile({
+                formRef, formType, period, agency, amount,
+                formData: { period, agency, amount },
+            });
+
+            // No provider connected yet — clear the optimistic row and guide the user.
+            if (res && res.configured === false) {
+                this._setLocalFiling(formRef, null);
+                if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+                this.showToast('No e-file provider connected yet. Connect one to transmit filings; you can still use "Mark Filed" for manual submissions.', 'warning');
+                return;
+            }
+
+            const sub = res.submission || {};
+            this._setLocalFiling(formRef, {
+                id:                     res.submissionId || sub.id,
+                form_ref:               formRef,
+                form_type:              formType,
+                period, agency, amount,
+                provider:               sub.provider,
+                provider_submission_id: res.providerSubmissionId,
+                status:                 res.status || 'submitted',
+                status_detail:          res.statusDetail,
+            });
+            if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+
+            if (res.status === 'error') {
+                this.showToast(`E-file failed: ${res.statusDetail || 'provider error'}`, 'danger');
+            } else if (res.status === 'accepted') {
+                this.showToast(`${formType} accepted by ${agency} ✓`, 'success');
+            } else {
+                this.showToast(`${formType} submitted — awaiting ${agency} acknowledgement.`, 'success');
+                if (res.submissionId) this.pollEfileStatus(res.submissionId, formRef);
+            }
+        } catch (err) {
+            this._setLocalFiling(formRef, null);
+            if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+            this.showToast('E-file failed: ' + err.message, 'danger');
+        }
+    },
+
+    /** Poll the provider for a submission's status until it's terminal. */
+    pollEfileStatus: function(submissionId, formRef, attempt = 0) {
+        if (attempt >= 5) return;
+        setTimeout(async () => {
+            try {
+                const res = await AeroDB.getEfileStatus(submissionId);
+                if (!res || res.configured === false) return;
+
+                const existing = (this.state.taxFilings || []).find(f => f.form_ref === formRef) || {};
+                const changed  = existing.status !== res.status;
+                this._setLocalFiling(formRef, { ...existing, status: res.status, status_detail: res.statusDetail });
+
+                if (changed && this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
+
+                if (res.status === 'accepted') {
+                    this.showToast(`${existing.form_type || 'Filing'} accepted ✓`, 'success');
+                } else if (res.status === 'rejected') {
+                    this.showToast(`Filing rejected: ${res.statusDetail || 'see provider portal'}`, 'danger');
+                } else {
+                    this.pollEfileStatus(submissionId, formRef, attempt + 1);
+                }
+            } catch (e) {
+                // Stop polling silently on transient errors.
+            }
+        }, 2500);
+    },
+
     populateW2Selectors: function() {
         const select = document.getElementById('w2EmployeeSelect');
         if (select) {
@@ -1578,6 +1675,55 @@ const AeroApp = {
         
         const necHTML = get1099NECHTML(emp, this.state);
         this.openModal(`IRS Form 1099-NEC: ${emp.name}`, necHTML, true);
+    },
+
+    // --- Free e-file exports (SSA EFW2 / IRS IRIS) ---
+
+    _downloadTextFile: function(filename, text, mime = 'text/plain') {
+        const blob = new Blob([text], { type: mime });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+
+    // Warn (but don't block) when required PII is missing; return the summary.
+    _efileReadiness: function(type) {
+        const r = checkEfileReadiness(this.state, type);
+        if (r.count === 0) {
+            this.showToast(`No ${type === 'w2' ? 'W-2 employees' : '1099 contractors'} to file.`, 'warning');
+            return null;
+        }
+        if (!r.ready) {
+            const missingEmps = r.employees.filter(e => e.missing.length);
+            const bits = [];
+            if (r.employerMissing.length) bits.push(`employer: ${r.employerMissing.join(', ')}`);
+            if (missingEmps.length) bits.push(`${missingEmps.length} of ${r.count} recipients missing SSN/address`);
+            this.showToast(`Heads up — file is incomplete (${bits.join('; ')}). Add the missing details before filing; downloading a draft for review.`, 'warning');
+        }
+        return r;
+    },
+
+    downloadEFW2: function() {
+        const r = this._efileReadiness('w2');
+        if (!r) return;
+        const year = new Date().getFullYear();
+        const file = generateEFW2(this.state, year);
+        this._downloadTextFile(`W2_EFW2_${year}.txt`, file);
+        if (r.ready) this.showToast('EFW2 file generated. Validate with SSA AccuWage, then upload free at SSA BSO.', 'success');
+    },
+
+    download1099CSV: function() {
+        const r = this._efileReadiness('nec');
+        if (!r) return;
+        const year = new Date().getFullYear();
+        const file = generate1099IRISCSV(this.state, year);
+        this._downloadTextFile(`1099NEC_IRIS_${year}.csv`, file, 'text/csv');
+        if (r.ready) this.showToast('IRIS CSV generated. Upload free at the IRS IRIS portal (TCC required).', 'success');
     },
 
 
@@ -1717,7 +1863,7 @@ const AeroApp = {
         const titles = {
             company:  ['Secure Login Portal',   'Authenticate to view payroll data'],
             employee: ['Employee Portal',        'Sign in with your work email'],
-            register: ['Create Free Account',    'Set up AeroPay for your company'],
+            register: ['Create Free Account',    'Set up GlidePay for your company'],
         };
         Object.keys(tabs).forEach(key => {
             document.getElementById(tabs[key])?.classList.toggle('active', key === tab);

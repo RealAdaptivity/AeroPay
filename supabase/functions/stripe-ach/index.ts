@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe ACH Edge Function
+ * GlidePay — Stripe ACH Edge Function
  * supabase/functions/stripe-ach/index.ts
  *
  * Deploy:
@@ -29,8 +29,8 @@ const supabase = createClient(
 // Optional — set RESEND_API_KEY secret to enable transactional emails.
 // If not set, emails are skipped but all other logic still runs.
 const RESEND_API_KEY  = Deno.env.get("RESEND_API_KEY") ?? "";
-const PLATFORM_FROM   = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@aeropay.io";
-const PLATFORM_URL    = Deno.env.get("PLATFORM_URL") ?? "https://aeropay.io";
+const PLATFORM_FROM   = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@glidepay.org";
+const PLATFORM_URL    = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
 
 // 3 business days in milliseconds (approximated as 3 × 24 h; weekend skipping
 // would require a calendar — this is conservative and simple).
@@ -153,22 +153,22 @@ async function handleConfirmSetup(userId: string, body: {
             subject: "Your direct deposit account was updated",
             html: `
                 <p>Hi ${empBefore.name},</p>
-                <p>Your direct deposit bank account on AeroPay has been updated to the account ending in <strong>••••${last4}</strong>.</p>
+                <p>Your direct deposit bank account on GlidePay has been updated to the account ending in <strong>••••${last4}</strong>.</p>
                 <p>Your first payroll deposit to this account will be held for <strong>3 business days</strong> as a security measure. ${prevLast4 ? `Your previous account (••••${prevLast4}) has been removed.` : ""}</p>
                 <p>If you did not make this change, contact your payroll administrator immediately.</p>
-                <p style="color:#6b7280;font-size:12px;">— AeroPay on behalf of ${companyName}</p>
+                <p style="color:#6b7280;font-size:12px;">— GlidePay on behalf of ${companyName}</p>
             `,
         }) : Promise.resolve(),
         // Admin alert
         company.admin_email ? sendEmail({
             to:      company.admin_email as string,
-            subject: `[AeroPay] Bank account changed — ${empBefore?.name}`,
+            subject: `[GlidePay] Bank account changed — ${empBefore?.name}`,
             html: `
-                <p>This is an automated security alert from AeroPay.</p>
+                <p>This is an automated security alert from GlidePay.</p>
                 <p><strong>${empBefore?.name}</strong> updated their direct deposit to the account ending in <strong>••••${last4}</strong>${prevLast4 ? ` (previously ••••${prevLast4})` : ""}.</p>
                 <p>A <strong>3-business-day hold</strong> has been applied before the first disbursement to this account.</p>
-                <p>If this change was not authorized, log in to AeroPay immediately and contact support.</p>
-                <p style="color:#6b7280;font-size:12px;"><a href="${PLATFORM_URL}">Open AeroPay</a></p>
+                <p>If this change was not authorized, log in to GlidePay immediately and contact support.</p>
+                <p style="color:#6b7280;font-size:12px;"><a href="${PLATFORM_URL}">Open GlidePay</a></p>
             `,
         }) : Promise.resolve(),
     ]).then(results => {
@@ -231,7 +231,7 @@ async function handleDisburse(userId: string, body: {
                         amount:                     d.netPayCents,
                         currency:                   "usd",
                         destination_payment_method: emp.stripe_pm_id,
-                        description:                `AeroPay payroll — run ${body.payrollRunId}`,
+                        description:                `GlidePay payroll — run ${body.payrollRunId}`,
                         metadata: {
                             company_id:     company.id,
                             employee_id:    d.employeeId,
