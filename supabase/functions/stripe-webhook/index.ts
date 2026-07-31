@@ -123,14 +123,14 @@ serve(async (req: Request) => {
  */
 async function handleSubscriptionUpsert(sub: Stripe.Subscription) {
     const customerId = sub.customer as string;
-    const companyId  = await resolveCompanyId(customerId);
+    const companyId  = await resolveCompanyId(customerId, sub);
 
     if (!companyId) {
-        console.warn(`[webhook] No company found for Stripe customer ${customerId}`);
+        console.warn(`[webhook] No company found for Stripe customer ${customerId} / sub ${sub.id}`);
         return;
     }
 
-    // Count seats from the per-seat price item quantity
+    // Count seats from the per-seat price item quantity (fallback: max item qty)
     let seatCount = 1;
     for (const item of sub.items.data) {
         const meta = item.price?.metadata;
@@ -138,7 +138,11 @@ async function handleSubscriptionUpsert(sub: Stripe.Subscription) {
             seatCount = item.quantity ?? 1;
             break;
         }
+        if ((item.quantity ?? 1) > seatCount) seatCount = item.quantity ?? 1;
     }
+
+    // Newer Stripe API versions put billing period on items, not the subscription.
+    const { start: periodStart, end: periodEnd } = subscriptionPeriod(sub);
 
     const { error } = await supabase.from("subscriptions").upsert({
         company_id:              companyId,
@@ -146,16 +150,30 @@ async function handleSubscriptionUpsert(sub: Stripe.Subscription) {
         stripe_subscription_id:  sub.id,
         status:                  sub.status,
         seat_count:              seatCount,
-        current_period_start:    new Date(sub.current_period_start * 1000).toISOString(),
-        current_period_end:      new Date(sub.current_period_end   * 1000).toISOString(),
-        cancel_at_period_end:    sub.cancel_at_period_end,
-        canceled_at:             sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
-        trial_end:               sub.trial_end   ? new Date(sub.trial_end   * 1000).toISOString() : null,
+        current_period_start:    periodStart,
+        current_period_end:      periodEnd,
+        cancel_at_period_end:    !!sub.cancel_at_period_end,
+        canceled_at:             unixToIso(sub.canceled_at),
+        trial_end:               unixToIso(sub.trial_end),
+        updated_at:              new Date().toISOString(),
     }, { onConflict: "company_id" });
 
     if (error) throw error;
 
     console.log(`[webhook] Subscription ${sub.id} → ${sub.status} for company ${companyId}`);
+}
+
+/** Billing period: prefer subscription fields, else first subscription item. */
+function subscriptionPeriod(sub: Stripe.Subscription): { start: string | null; end: string | null } {
+    const item = sub.items?.data?.[0] as { current_period_start?: number; current_period_end?: number } | undefined;
+    const startUnix = (sub as any).current_period_start ?? item?.current_period_start ?? null;
+    const endUnix   = (sub as any).current_period_end   ?? item?.current_period_end   ?? null;
+    return { start: unixToIso(startUnix), end: unixToIso(endUnix) };
+}
+
+function unixToIso(unix: number | null | undefined): string | null {
+    if (unix == null || !Number.isFinite(Number(unix))) return null;
+    return new Date(Number(unix) * 1000).toISOString();
 }
 
 /**
@@ -346,12 +364,15 @@ async function handleAccountUpdated(account: Stripe.Account) {
 }
 
 /**
- * Resolve company_id from a Stripe customer ID.
- * First checks our subscriptions table, then falls back to
- * customer metadata (set via checkout session metadata).
+ * Resolve company_id from subscription metadata, existing row, or customer metadata.
  */
-async function resolveCompanyId(customerId: string): Promise<string | null> {
-    // Try existing subscription row
+async function resolveCompanyId(
+    customerId: string,
+    sub?: Stripe.Subscription,
+): Promise<string | null> {
+    const fromSubMeta = sub?.metadata?.company_id;
+    if (fromSubMeta) return fromSubMeta;
+
     const { data: existing } = await supabase
         .from("subscriptions")
         .select("company_id")
@@ -360,10 +381,8 @@ async function resolveCompanyId(customerId: string): Promise<string | null> {
 
     if (existing?.company_id) return existing.company_id;
 
-    // Try Stripe customer metadata (set during Checkout)
     const customer = await stripe.customers.retrieve(customerId);
     if ("deleted" in customer) return null;
 
-    const companyId = (customer as Stripe.Customer).metadata?.company_id;
-    return companyId ?? null;
+    return (customer as Stripe.Customer).metadata?.company_id ?? null;
 }
