@@ -136,8 +136,9 @@ async function handleGetStatus(userId: string) {
                     features: {
                         inbound_transfers:   { ach: { requested: true } },
                         outbound_transfers:  { ach: { requested: true } },
-                        outbound_payments:   { us_bank_account: { requested: true } },
+                        outbound_payments:   { ach: { requested: true } },
                         financial_addresses: { aba: { requested: true } },
+                        intra_stripe_flows:  { requested: true },
                     },
                 },
                 { stripeAccount: company.stripe_account_id as string },
@@ -217,10 +218,11 @@ async function handleCreateFinancialAccount(userId: string) {
         {
             supported_currencies: ["usd"],
             features: {
-                inbound_transfers:  { ach: { requested: true } },
-                outbound_transfers: { ach: { requested: true } },
-                outbound_payments:  { us_bank_account: { requested: true } },
+                inbound_transfers:   { ach: { requested: true } },
+                outbound_transfers:  { ach: { requested: true } },
+                outbound_payments:   { ach: { requested: true } },
                 financial_addresses: { aba: { requested: true } },
+                intra_stripe_flows:  { requested: true },
             },
         },
         { stripeAccount: company.stripe_account_id },
@@ -259,6 +261,8 @@ async function buildAccountLink(stripeAccountId: string, companyId: string) {
     const link = await stripe.accountLinks.create({
         account:     stripeAccountId,
         type:        "account_onboarding",
+        // Ensure bank (external_account) is collected even if other KYB was already submitted.
+        collect:     "eventually_due",
         refresh_url: `${PLATFORM_URL}?connect=refresh`,
         return_url:  `${PLATFORM_URL}?connect=return`,
     });
