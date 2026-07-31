@@ -115,8 +115,50 @@ function _toAppRun(run, lineItems = []) {
         grossPayroll:  parseFloat(run.gross_payroll),
         employerTaxes: parseFloat(run.employer_taxes),
         totalCost:     parseFloat(run.total_cost),
+        submittedBy:   run.submitted_by || null,
+        approvedBy:    run.approved_by  || null,
+        submittedAt:   run.submitted_at || null,
+        approvedAt:    run.approved_at  || null,
         details,
     };
+}
+
+/** Format an ISO timestamp for Approvals UI. */
+function _formatApprovalTs(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+    });
+}
+
+/**
+ * Map payroll_runs into the payrollApprovals shape expected by renderApprovalsView.
+ * pending → pending; rejected → rejected; completed/other → approved.
+ */
+function _runsToApprovals(runs, userIdToLabel = {}) {
+    return runs.map(run => {
+        let status = 'approved';
+        if (run.status === 'pending') status = 'pending';
+        else if (run.status === 'rejected') status = 'rejected';
+
+        const submittedLabel = userIdToLabel[run.submittedBy] || 'Admin';
+        const approvedLabel  = run.approvedBy
+            ? (userIdToLabel[run.approvedBy] || 'Admin')
+            : null;
+
+        return {
+            id:            run.id,
+            runId:         run.id,
+            status,
+            submittedBy:   submittedLabel,
+            approvedBy:    approvedLabel,
+            submittedTs:   _formatApprovalTs(run.submittedAt),
+            approvedTs:    _formatApprovalTs(run.approvedAt),
+            totalAmount:   run.totalCost,
+            employeeCount: run.employeeCount,
+        };
+    });
 }
 
 // ─────────────────────────────────────────────
@@ -430,8 +472,8 @@ const AeroDB = {
     },
 
     /**
-     * Save a completed payroll run (run header + one line item per employee).
-     * Mirrors what submitPayrollRun() currently does to localStorage.
+     * Save a payroll run as pending approval (run header + line items).
+     * ACH and YTD side-effects happen after approvePayrollRun().
      *
      * @param {object} runSummary  { grossPayroll, employerTaxes, totalCost, employeeCount, periodStart, periodEnd }
      * @param {object} activeRunData  { [empId]: { results: {...} } }
@@ -440,22 +482,20 @@ const AeroDB = {
         const company = await this.getCompany();
         const user    = await this.getUser();
 
-        // Insert the run header
+        // Insert the run header — pending until Approvals tab confirms
         const run = _check(
             await _sb.from('payroll_runs').insert({
                 company_id:     company.id,
                 run_date:       new Date().toISOString().slice(0, 10),
                 period_start:   runSummary.periodStart,
                 period_end:     runSummary.periodEnd,
-                status:         'completed',
+                status:         'pending',
                 gross_payroll:  runSummary.grossPayroll,
                 employer_taxes: runSummary.employerTaxes,
                 total_cost:     runSummary.totalCost,
                 employee_count: runSummary.employeeCount,
                 submitted_by:   user.id,
-                approved_by:    user.id,
                 submitted_at:   new Date().toISOString(),
-                approved_at:    new Date().toISOString(),
             }).select().single(),
             'savePayrollRun → header'
         );
@@ -502,12 +542,62 @@ const AeroDB = {
         );
 
         await this.addAuditLog(
-            'Payroll Processed',
-            `Processed run for ${runSummary.employeeCount} employees. Total: $${runSummary.totalCost.toFixed(2)}`,
+            'Payroll Submitted for Approval',
+            `Submitted run for ${runSummary.employeeCount} employees. Total: $${runSummary.totalCost.toFixed(2)}`,
             'payroll'
         );
 
         return run.id;
+    },
+
+    /** Approve a pending payroll run — marks completed and records approver. */
+    async approvePayrollRun(runId) {
+        const user = await this.getUser();
+        const run = _check(
+            await _sb.from('payroll_runs')
+                .update({
+                    status:      'completed',
+                    approved_by: user.id,
+                    approved_at: new Date().toISOString(),
+                })
+                .eq('id', runId)
+                .eq('status', 'pending')
+                .select()
+                .single(),
+            'approvePayrollRun'
+        );
+
+        await this.addAuditLog(
+            'Payroll Approved',
+            `Approved payroll run ${runId}. Total: $${parseFloat(run.total_cost).toFixed(2)}`,
+            'payroll'
+        );
+
+        return run.id;
+    },
+
+    /** Reject a pending payroll run. */
+    async rejectPayrollRun(runId) {
+        const user = await this.getUser();
+        _check(
+            await _sb.from('payroll_runs')
+                .update({
+                    status:      'rejected',
+                    approved_by: user.id,
+                    approved_at: new Date().toISOString(),
+                })
+                .eq('id', runId)
+                .eq('status', 'pending')
+                .select()
+                .single(),
+            'rejectPayrollRun'
+        );
+
+        await this.addAuditLog(
+            'Payroll Rejected',
+            `Rejected payroll run ${runId}`,
+            'payroll'
+        );
     },
 
     /**
@@ -1118,6 +1208,7 @@ const AeroDB = {
             payAdvances,
             filingRecords,
             taxFilings,
+            user,
         ] = await Promise.all([
             this.getCompany(),
             this.getEmployees(),
@@ -1134,7 +1225,12 @@ const AeroDB = {
             this.getPayAdvances(),
             this.getFilingRecords(),
             this.getTaxFilings(),
+            this.getUser(),
         ]);
+
+        // Resolve actor labels for Approvals (current user email when they submitted/approved)
+        const userIdToLabel = {};
+        if (user?.id) userIdToLabel[user.id] = user.email || 'Admin';
 
         return {
             settings: {
@@ -1147,6 +1243,7 @@ const AeroDB = {
             },
             employees,
             payrollHistory,
+            payrollApprovals: _runsToApprovals(payrollHistory, userIdToLabel),
             timesheets:      timesheetMap,
             ptoBalances,
             ptoRequests,
@@ -1156,7 +1253,7 @@ const AeroDB = {
             onboardingQueue,
             integrations,
             syncLogs,
-            payAdvances,
+            payAdvances:     payAdvances || [],
             filingRecords,
             taxFilings,
             garnishments:    [],   // attached per-employee inside getEmployees()

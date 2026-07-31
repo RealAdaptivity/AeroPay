@@ -1384,8 +1384,45 @@ const AeroApp = {
             periodEnd,
         };
         try {
-            const newRunId = await AeroDB.savePayrollRun(runSummary, this.activeRunData);
-            for (const [empId, data] of Object.entries(this.activeRunData)) {
+            await AeroDB.savePayrollRun(runSummary, this.activeRunData);
+            this.activeRunData = {};
+            await this._refreshState();
+            this.showToast('Payroll submitted for approval.', 'success');
+            this.navigateTo('approvals');
+        } catch (err) { this.showToast('Payroll submission failed: ' + err.message, 'danger'); }
+    },
+
+    /**
+     * Build activeRunData-shaped object from a saved payroll run's line-item details.
+     * Used by approvePayroll to run ACH / garnishment / advance side-effects.
+     */
+    _runDetailsToActiveData: function(run) {
+        const active = {};
+        Object.entries(run.details || {}).forEach(([empId, results]) => {
+            active[empId] = {
+                results,
+                employee: this.state.employees.find(e => e.id === empId),
+            };
+        });
+        return active;
+    },
+
+    approvePayroll: async function(apprId) {
+        const appr = (this.state.payrollApprovals || []).find(a => a.id === apprId);
+        if (!appr || appr.status !== 'pending') {
+            this.showToast('This payroll run is not pending approval.', 'warning');
+            return;
+        }
+        const run = (this.state.payrollHistory || []).find(r => r.id === appr.runId);
+        if (!run) {
+            this.showToast('Payroll run details not found.', 'danger');
+            return;
+        }
+        try {
+            await AeroDB.approvePayrollRun(appr.runId);
+            const activeRunData = this._runDetailsToActiveData(run);
+
+            for (const [empId, data] of Object.entries(activeRunData)) {
                 const emp = this.state.employees.find(e => e.id === empId);
                 if (emp?.garnishments?.length && data.results.garnishmentDeductions > 0) {
                     let rem = data.results.garnishmentDeductions;
@@ -1395,21 +1432,53 @@ const AeroApp = {
                     }
                 }
                 if (data.results.payAdvanceDeduction > 0) {
-                    const adv = this.state.payAdvances.find(a => a.empId === empId && a.status === 'approved');
-                    if (adv) await AeroDB.repayPayAdvance(adv.id, newRunId);
+                    const adv = (this.state.payAdvances || []).find(a => a.empId === empId && a.status === 'approved');
+                    if (adv) await AeroDB.repayPayAdvance(adv.id, appr.runId);
                 }
             }
-            const integ = this.state.integrations || {};
-            if (integ.quickbooks) await AeroDB.addSyncLog('quickbooks', `Synced period ${periodEnd} — Gross: ${formatCurrency(grossPayrollSum)}`, totalCostSum, newRunId);
-            if (integ.xero)       await AeroDB.addSyncLog('xero', `Exported salaries ledger for period ${periodEnd}`, totalCostSum, newRunId);
 
-            // Initiate ACH disbursements for employees with a linked bank account
-            await _initiateAchDisbursements(newRunId, this.activeRunData);
+            const integ = this.state.integrations || {};
+            if (integ.quickbooks) {
+                await AeroDB.addSyncLog(
+                    'quickbooks',
+                    `Synced period ${run.periodEnd} — Gross: ${formatCurrency(run.grossPayroll)}`,
+                    run.totalCost,
+                    appr.runId
+                );
+            }
+            if (integ.xero) {
+                await AeroDB.addSyncLog(
+                    'xero',
+                    `Exported salaries ledger for period ${run.periodEnd}`,
+                    run.totalCost,
+                    appr.runId
+                );
+            }
+
+            await _initiateAchDisbursements(appr.runId, activeRunData);
 
             await this._refreshState();
-            this.showToast('Payroll submitted! ACH transfers are being processed.', 'success');
-            this.navigateTo('dashboard');
-        } catch (err) { this.showToast('Payroll submission failed: ' + err.message, 'danger'); }
+            this.showToast('Payroll approved! ACH transfers are being processed.', 'success');
+            this.navigateTo('approvals');
+        } catch (err) {
+            this.showToast('Failed to approve payroll: ' + err.message, 'danger');
+        }
+    },
+
+    rejectPayroll: async function(apprId) {
+        const appr = (this.state.payrollApprovals || []).find(a => a.id === apprId);
+        if (!appr || appr.status !== 'pending') {
+            this.showToast('This payroll run is not pending approval.', 'warning');
+            return;
+        }
+        try {
+            await AeroDB.rejectPayrollRun(appr.runId);
+            await this._refreshState();
+            this.showToast('Payroll run rejected.', 'info');
+            this.navigateTo('approvals');
+        } catch (err) {
+            this.showToast('Failed to reject payroll: ' + err.message, 'danger');
+        }
     },
 
     showPayrollHistoryDetails: function(runId) {
