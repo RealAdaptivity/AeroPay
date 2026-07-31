@@ -282,6 +282,26 @@ const AeroDB = {
         };
     },
 
+    /**
+     * If the signed-in user is linked to an employee row (portal invite), return it.
+     * Uses a direct employees.user_id lookup so multi-company users still resolve
+     * even when RLS current_company_id() briefly points at another company.
+     */
+    async getMyEmployeeRecord() {
+        const user = await this.getUser();
+        if (!user) return null;
+        const { data, error } = await _sb
+            .from('employees')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (error || !data) return null;
+        return _toAppEmployee(data);
+    },
+
     /** Fetch the company record for the logged-in owner, admin, or invited employee. */
     async getCompany() {
         const user = await this.getUser();
@@ -291,22 +311,38 @@ const AeroDB = {
         // when auth fires SIGNED_IN before company rows exist.
         let lastErr;
         for (let attempt = 0; attempt < 8; attempt++) {
-            // 1) Company owner
-            const owned = await _sb.from('companies').select('*').eq('owner_id', user.id).maybeSingle();
-            if (owned.error) lastErr = owned.error;
-            else if (owned.data) return this._mapCompanyRow(owned.data);
-
-            // 2) Invited employee (or any member) via RLS current_company_id()
-            const member = await _sb.from('companies').select('*').maybeSingle();
-            if (member.error) lastErr = member.error;
-            else if (member.data) return this._mapCompanyRow(member.data);
-
-            // 3) Explicit employee → company_id lookup, then company row
-            const emp = await _sb.from('employees').select('company_id').eq('user_id', user.id).maybeSingle();
+            // 1) Active employee portal link — prefer employer over any old owned sandbox company
+            const emp = await _sb
+                .from('employees')
+                .select('company_id')
+                .eq('user_id', user.id)
+                .eq('is_active', true)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
             if (emp.data?.company_id) {
                 const byId = await _sb.from('companies').select('*').eq('id', emp.data.company_id).maybeSingle();
                 if (byId.error) lastErr = byId.error;
                 else if (byId.data) return this._mapCompanyRow(byId.data);
+            }
+
+            // 2) Membership via RLS current_company_id()
+            const member = await _sb.from('companies').select('*').limit(1).maybeSingle();
+            if (member.error) lastErr = member.error;
+            else if (member.data) return this._mapCompanyRow(member.data);
+
+            // 3) Owned companies — prefer one with Stripe / setup complete, newest first
+            const owned = await _sb
+                .from('companies')
+                .select('*')
+                .eq('owner_id', user.id)
+                .order('updated_at', { ascending: false });
+            if (owned.error) lastErr = owned.error;
+            else if (owned.data?.length) {
+                const preferred = owned.data.find((c) => c.stripe_account_id)
+                    || owned.data.find((c) => c.setup_complete)
+                    || owned.data[0];
+                return this._mapCompanyRow(preferred);
             }
 
             await new Promise(r => setTimeout(r, 150 * (attempt + 1)));

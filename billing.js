@@ -131,9 +131,14 @@ const AeroBilling = {
      * Returns null if no subscription exists.
      */
     async getSubscription() {
+        // Employees don't manage billing — skip the query (RLS often returns []).
+        if (window.AeroApp?.session?.role === "employee") return null;
+
         const { data, error } = await _sb
             .from("subscriptions")
             .select("*")
+            .order("updated_at", { ascending: false })
+            .limit(1)
             .maybeSingle();
 
         if (error) {
@@ -182,9 +187,24 @@ const AeroBilling = {
      * Call this from _loadStateAndNavigate after state is loaded.
      */
     async renderBillingBanner() {
-        const sub     = await this.getSubscription();
         const banner  = document.getElementById("aeroBillingBanner");
         if (!banner) return;
+
+        // Billing is company-admin only — never show trial/paywall CTAs in the employee portal.
+        if (window.AeroApp?.session?.role === "employee") {
+            banner.style.display = "none";
+            banner.innerHTML = "";
+            return;
+        }
+
+        const sub = await this.getSubscription();
+
+        // Paid or trial — never show the free-trial CTA.
+        if (sub && ["active", "trialing"].includes(sub.status)) {
+            banner.style.display = "none";
+            banner.innerHTML = "";
+            return;
+        }
 
         if (!sub || sub.status === "incomplete" || sub.status === "incomplete_expired") {
             // Never subscribed

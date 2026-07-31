@@ -284,7 +284,15 @@ const AeroApp = {
         try {
             this.state = await AeroDB.loadFullState();
             const user = await AeroDB.getUser();
-            const empRecord = this.state.employees.find(e => e.userId === user.id);
+            // Prefer direct portal link — multi-company users may load the wrong
+            // company roster and miss themselves in state.employees.
+            let empRecord = this.state.employees.find(e => e.userId === user.id);
+            if (!empRecord && typeof AeroDB.getMyEmployeeRecord === 'function') {
+                empRecord = await AeroDB.getMyEmployeeRecord();
+                if (empRecord && !this.state.employees.some(e => e.id === empRecord.id)) {
+                    this.state.employees = [...this.state.employees, empRecord];
+                }
+            }
 
             if (empRecord) {
                 this.session = {
@@ -315,8 +323,14 @@ const AeroApp = {
             }
             this.populateW2Selectors();
             if (typeof AeroBilling !== 'undefined') {
-                AeroBilling.renderBillingBanner();
-                AeroBilling.handleCheckoutReturn();
+                // Employees never see subscription / free-trial banners.
+                if (this.session?.role !== 'employee') {
+                    AeroBilling.renderBillingBanner();
+                    AeroBilling.handleCheckoutReturn();
+                } else {
+                    const banner = document.getElementById('aeroBillingBanner');
+                    if (banner) { banner.style.display = 'none'; banner.innerHTML = ''; }
+                }
             }
             await this._handleConnectReturn();
         } catch (err) {
@@ -487,6 +501,14 @@ const AeroApp = {
         const publicViews = ['landing', 'privacy-policy', 'terms-of-service'];
         if (!publicViews.includes(viewName) && (!this.session || !this.session.isLoggedIn)) {
             viewName = 'landing';
+        }
+
+        // Employees stay in the self-service portal (no company billing/settings).
+        const adminOnlyViews = ['settings', 'dashboard', 'employees', 'onboarding', 'directory',
+            'pto-admin', 'benefits-admin', 'payroll', 'approvals', 'time-tracking',
+            'tax-compliance', 'reports', 'announcements', 'audit-log', 'integrations'];
+        if (this.session?.role === 'employee' && adminOnlyViews.includes(viewName)) {
+            viewName = 'employee-dashboard';
         }
         
         this.currentView = viewName;
@@ -3015,11 +3037,17 @@ const AeroApp = {
             await AeroDB.saveW2Signature(employeeId, sigData, 'client', navigator.userAgent.slice(0, 120));
             if (!this.state.w2Signatures) this.state.w2Signatures = {};
             this.state.w2Signatures[employeeId] = {
-                employeeId, signatureData: sigData,
+                employeeId,
+                employeeName: employee?.name || '',
+                signatureData: sigData,
                 timestamp: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
             };
             this.closeModal();
             this.showToast(`W-2 signed successfully by ${employee?.name}!`, 'success');
+            // Refresh documents list so "Signature Required" flips to Digitally Signed.
+            if (this.currentView === 'employee-documents') {
+                this.navigateTo('employee-documents');
+            }
             setTimeout(() => this.generateEmployeeW2(), 300);
         } catch (err) { this.showToast('Failed to save signature: ' + err.message, 'danger'); }
     },
