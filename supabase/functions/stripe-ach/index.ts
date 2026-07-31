@@ -6,14 +6,12 @@
  *   supabase functions deploy stripe-ach
  *
  * Actions:
- *   setup_intent   — Create a SetupIntent so the frontend can collect an employee's
- *                    bank account via Stripe.js (us_bank_account payment method).
- *   confirm_setup  — Attach the confirmed PaymentMethod to an employee record,
- *                    stamp bank_account_linked_at, and email both the employee
- *                    and company admin as a fraud control.
- *   disburse       — Kick off OutboundTransfers (Stripe Treasury) for every employee
- *                    in a payroll run, enforcing the 3-business-day hold for
- *                    newly linked accounts.
+ *   setup_intent   — Create a Customer + SetupIntent so the frontend can collect an
+ *                    employee's bank via Financial Connections (for OutboundPayments).
+ *   confirm_setup  — Persist the confirmed PaymentMethod + customer on the employee,
+ *                    stamp bank_account_linked_at, and email employee + admin.
+ *   disburse       — Kick off OutboundPayments (Stripe Treasury) for every employee
+ *                    in a payroll run, enforcing the 3-day hold for newly linked accounts.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -26,14 +24,10 @@ const supabase = createClient(
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-// Optional — set RESEND_API_KEY secret to enable transactional emails.
-// If not set, emails are skipped but all other logic still runs.
 const RESEND_API_KEY  = Deno.env.get("RESEND_API_KEY") ?? "";
 const PLATFORM_FROM   = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@glidepay.org";
 const PLATFORM_URL    = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
 
-// 3 business days in milliseconds (approximated as 3 × 24 h; weekend skipping
-// would require a calendar — this is conservative and simple).
 const HOLD_MS = 3 * 24 * 60 * 60 * 1000;
 
 const CORS = {
@@ -62,20 +56,39 @@ serve(async (req: Request) => {
         }
     } catch (err) {
         console.error(`[stripe-ach] ${action}:`, err);
-        return json({ error: err.message }, 500);
+        return json({ error: (err as Error).message }, 500);
     }
 });
 
 // ── Setup Intent ───────────────────────────────────────────────────────────────
 async function handleSetupIntent(userId: string, body: { employeeId: string }) {
-    const company = await getCompany(userId);
+    if (!body.employeeId) return json({ error: "employeeId is required" }, 400);
 
-    if (!company.stripe_account_id) {
+    const company = await getCompany(userId, { employeeId: body.employeeId });
+    const connectedAccountId = company.stripe_account_id as string | undefined;
+
+    if (!connectedAccountId) {
         return json({ error: "Stripe connected account not set up. Complete onboarding first." }, 400);
     }
 
+    const { data: emp, error: empErr } = await supabase
+        .from("employees")
+        .select("id, name, email, stripe_customer_id, company_id, user_id")
+        .eq("id", body.employeeId)
+        .eq("company_id", company.id)
+        .single();
+    if (empErr || !emp) return json({ error: "Employee not found" }, 404);
+
+    // Employees may only link their own bank account.
+    if (emp.user_id && emp.user_id !== userId && company._membershipRole === "employee") {
+        return json({ error: "Not allowed to link bank for another employee" }, 403);
+    }
+
+    const customerId = await ensureEmployeeCustomer(emp, connectedAccountId);
+
     const intent = await stripe.setupIntents.create(
         {
+            customer: customerId,
             payment_method_types: ["us_bank_account"],
             payment_method_options: {
                 us_bank_account: {
@@ -88,43 +101,72 @@ async function handleSetupIntent(userId: string, body: { employeeId: string }) {
                 employee_id: body.employeeId,
             },
         },
-        { stripeAccount: company.stripe_account_id as string },
+        { stripeAccount: connectedAccountId },
     );
 
-    return json({ client_secret: intent.client_secret });
+    return json({ client_secret: intent.client_secret, customer_id: customerId });
 }
 
 // ── Confirm Setup ──────────────────────────────────────────────────────────────
-// Stamps bank_account_linked_at (starts the 3-day hold clock) and fires
-// alert emails to both the employee and the company admin.
 async function handleConfirmSetup(userId: string, body: {
     employeeId:      string;
     paymentMethodId: string;
 }) {
-    const company = await getCompany(userId);
+    if (!body.employeeId || !body.paymentMethodId) {
+        return json({ error: "employeeId and paymentMethodId are required" }, 400);
+    }
 
-    if (!company.stripe_account_id) {
+    const company = await getCompany(userId, { employeeId: body.employeeId });
+    const connectedAccountId = company.stripe_account_id as string | undefined;
+
+    if (!connectedAccountId) {
         return json({ error: "Stripe connected account not set up." }, 400);
     }
+
+    const { data: empBefore } = await supabase
+        .from("employees")
+        .select("name, email, bank_account_last4, stripe_customer_id, company_id, user_id")
+        .eq("id", body.employeeId)
+        .eq("company_id", company.id)
+        .single();
+    if (!empBefore) return json({ error: "Employee not found" }, 404);
+
+    if (empBefore.user_id && empBefore.user_id !== userId && company._membershipRole === "employee") {
+        return json({ error: "Not allowed to link bank for another employee" }, 403);
+    }
+
+    const customerId = await ensureEmployeeCustomer(
+        { ...empBefore, id: body.employeeId },
+        connectedAccountId,
+    );
 
     const pm = await stripe.paymentMethods.retrieve(
         body.paymentMethodId,
         {},
-        { stripeAccount: company.stripe_account_id as string },
+        { stripeAccount: connectedAccountId },
     );
+
+    // Attach if SetupIntent did not already (idempotent when already attached).
+    if (pm.customer !== customerId) {
+        try {
+            await stripe.paymentMethods.attach(
+                body.paymentMethodId,
+                { customer: customerId },
+                { stripeAccount: connectedAccountId },
+            );
+        } catch (err) {
+            const msg = (err as Error).message || "";
+            if (!/already been attached/i.test(msg)) throw err;
+        }
+    }
+
     const last4   = (pm as any).us_bank_account?.last4 ?? "";
     const routing = (pm as any).us_bank_account?.routing_number ?? "";
     const linkedAt = new Date().toISOString();
 
-    // Fetch employee record before update so we have email + old last4
-    const { data: empBefore } = await supabase
-        .from("employees")
-        .select("name, email, bank_account_last4")
-        .eq("id", body.employeeId)
-        .single();
-
     const { error } = await supabase.from("employees").update({
         stripe_pm_id:           body.paymentMethodId,
+        stripe_customer_id:     customerId,
         bank_account_last4:     last4,
         bank_routing:           routing,
         bank_account_linked_at: linkedAt,
@@ -132,7 +174,6 @@ async function handleConfirmSetup(userId: string, body: {
 
     if (error) throw error;
 
-    // Audit log
     const prevLast4 = empBefore?.bank_account_last4;
     await supabase.from("audit_log").insert({
         company_id:  company.id,
@@ -144,10 +185,8 @@ async function handleConfirmSetup(userId: string, body: {
         category:    "employee",
     });
 
-    // Send alert emails (fire-and-forget; failures are logged but don't block)
     const companyName = (company.name as string) ?? "Your employer";
     await Promise.allSettled([
-        // Employee alert
         empBefore?.email ? sendEmail({
             to:      empBefore.email,
             subject: "Your direct deposit account was updated",
@@ -159,7 +198,6 @@ async function handleConfirmSetup(userId: string, body: {
                 <p style="color:#6b7280;font-size:12px;">— GlidePay on behalf of ${companyName}</p>
             `,
         }) : Promise.resolve(),
-        // Admin alert
         company.admin_email ? sendEmail({
             to:      company.admin_email as string,
             subject: `[GlidePay] Bank account changed — ${empBefore?.name}`,
@@ -177,7 +215,7 @@ async function handleConfirmSetup(userId: string, body: {
         });
     });
 
-    return json({ ok: true, last4, routing, linkedAt });
+    return json({ ok: true, last4, routing, linkedAt, customerId });
 }
 
 // ── Disburse ──────────────────────────────────────────────────────────────────
@@ -194,7 +232,6 @@ async function handleDisburse(userId: string, body: {
         return json({ error: "payrollRunId is required" }, 400);
     }
 
-    // Prefer explicit disbursements from the client; otherwise load net pay from line items.
     let disbursements = Array.isArray(body.disbursements) ? body.disbursements : [];
     if (!disbursements.length) {
         const { data: lines, error: lineErr } = await supabase
@@ -209,21 +246,20 @@ async function handleDisburse(userId: string, body: {
         }));
     }
 
-    const results: Array<{ employeeId: string; status: string; transferId?: string; heldUntil?: string }> = [];
+    const results: Array<{ employeeId: string; status: string; transferId?: string; heldUntil?: string; error?: string }> = [];
 
     for (const d of disbursements) {
         if (d.netPayCents <= 0) continue;
 
         const { data: emp } = await supabase
             .from("employees")
-            .select("stripe_pm_id, bank_account_last4, name, email, bank_account_linked_at")
+            .select("stripe_pm_id, stripe_customer_id, bank_account_last4, name, email, bank_account_linked_at")
             .eq("id", d.employeeId)
             .single();
 
-        // ── 3-day hold check ──────────────────────────────────────────────────
-        const linkedAt    = emp?.bank_account_linked_at ? new Date(emp.bank_account_linked_at).getTime() : null;
+        const linkedAt     = emp?.bank_account_linked_at ? new Date(emp.bank_account_linked_at).getTime() : null;
         const inHoldWindow = linkedAt !== null && (now - linkedAt) < HOLD_MS;
-        const heldUntil   = inHoldWindow ? new Date(linkedAt + HOLD_MS).toISOString() : undefined;
+        const heldUntil    = inHoldWindow ? new Date(linkedAt! + HOLD_MS).toISOString() : undefined;
 
         if (inHoldWindow) {
             await supabase.from("ach_transfers").insert({
@@ -238,19 +274,21 @@ async function handleDisburse(userId: string, body: {
             continue;
         }
 
-        // ── Initiate OutboundTransfer ─────────────────────────────────────────
         let stripeTransferId: string | undefined;
         let status = "processing";
+        let failureMessage: string | null = null;
 
-        if (emp?.stripe_pm_id && financialAccountId && connectedAccountId) {
+        if (emp?.stripe_pm_id && emp?.stripe_customer_id && financialAccountId && connectedAccountId) {
             try {
-                const transfer = await stripe.treasury.outboundTransfers.create(
+                const payment = await stripe.treasury.outboundPayments.create(
                     {
                         financial_account:          financialAccountId,
                         amount:                     d.netPayCents,
                         currency:                   "usd",
+                        customer:                   emp.stripe_customer_id,
                         destination_payment_method: emp.stripe_pm_id,
                         description:                `GlidePay payroll — run ${body.payrollRunId}`,
+                        statement_descriptor:       "PAYROLL",
                         metadata: {
                             company_id:     company.id,
                             employee_id:    d.employeeId,
@@ -259,10 +297,19 @@ async function handleDisburse(userId: string, body: {
                     },
                     { stripeAccount: connectedAccountId },
                 );
-                stripeTransferId = transfer.id;
+                stripeTransferId = payment.id;
             } catch (err) {
-                console.warn(`[stripe-ach] OutboundTransfer failed for ${d.employeeId}:`, err.message);
+                status = "failed";
+                failureMessage = (err as Error).message;
+                console.warn(`[stripe-ach] OutboundPayment failed for ${d.employeeId}:`, failureMessage);
             }
+        } else {
+            status = "failed";
+            failureMessage = !emp?.stripe_pm_id
+                ? "Employee has no linked bank account"
+                : !emp?.stripe_customer_id
+                ? "Employee Stripe customer missing — re-link bank account"
+                : "Company financial account not ready";
         }
 
         const { error: insertErr } = await supabase.from("ach_transfers").insert({
@@ -272,11 +319,17 @@ async function handleDisburse(userId: string, body: {
             stripe_transfer_id: stripeTransferId ?? null,
             amount_cents:       d.netPayCents,
             status,
+            failure_message:    failureMessage,
         });
 
         if (insertErr) console.error("[stripe-ach] insert ach_transfers:", insertErr.message);
 
-        results.push({ employeeId: d.employeeId, status, transferId: stripeTransferId });
+        results.push({
+            employeeId: d.employeeId,
+            status,
+            transferId: stripeTransferId,
+            error: failureMessage || undefined,
+        });
     }
 
     return json({ results });
@@ -284,30 +337,114 @@ async function handleDisburse(userId: string, body: {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function getCompany(userId: string) {
-    const [companyRes, userRes] = await Promise.all([
-        supabase
-            .from("company_users")
-            .select("company_id, companies(*)")
-            .eq("user_id", userId)
-            .single(),
-        supabase.auth.admin.getUserById(userId),
-    ]);
+async function ensureEmployeeCustomer(
+    emp: { id: string; name?: string | null; email?: string | null; stripe_customer_id?: string | null },
+    connectedAccountId: string,
+): Promise<string> {
+    if (emp.stripe_customer_id) {
+        try {
+            await stripe.customers.retrieve(
+                emp.stripe_customer_id,
+                {},
+                { stripeAccount: connectedAccountId },
+            );
+            return emp.stripe_customer_id;
+        } catch {
+            // Recreate if missing on the connected account
+        }
+    }
 
-    if (companyRes.error || !companyRes.data) throw new Error("Company not found for user");
+    const customer = await stripe.customers.create(
+        {
+            name:  emp.name || undefined,
+            email: emp.email || undefined,
+            metadata: { employee_id: emp.id },
+        },
+        { stripeAccount: connectedAccountId },
+    );
 
-    return {
-        id:          companyRes.data.company_id,
-        admin_email: userRes.data?.user?.email ?? null,
-        ...(companyRes.data.companies as Record<string, unknown>),
-    };
+    await supabase.from("employees").update({
+        stripe_customer_id: customer.id,
+    }).eq("id", emp.id);
+
+    return customer.id;
 }
 
 /**
- * Send a transactional email via Resend.
- * Requires the RESEND_API_KEY and PLATFORM_FROM_EMAIL secrets.
- * Silently skips if the key is not configured.
+ * Resolve the company for a user.
+ * Users can belong to multiple companies (e.g. old sandbox + current employer);
+ * `.single()` fails in that case — prefer the company tied to employeeId / portal link.
  */
+async function getCompany(userId: string, opts: { employeeId?: string } = {}) {
+    const userRes = await supabase.auth.admin.getUserById(userId);
+    const adminEmail = userRes.data?.user?.email ?? null;
+
+    let preferredCompanyId: string | null = null;
+
+    if (opts.employeeId) {
+        const { data: emp } = await supabase
+            .from("employees")
+            .select("company_id, user_id")
+            .eq("id", opts.employeeId)
+            .maybeSingle();
+        if (emp?.company_id) preferredCompanyId = emp.company_id as string;
+    }
+
+    if (!preferredCompanyId) {
+        const { data: selfEmp } = await supabase
+            .from("employees")
+            .select("company_id")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .maybeSingle();
+        if (selfEmp?.company_id) preferredCompanyId = selfEmp.company_id as string;
+    }
+
+    const { data: memberships, error } = await supabase
+        .from("company_users")
+        .select("company_id, role, companies(*)")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+    if (error) throw new Error(`Company lookup failed: ${error.message}`);
+
+    const rows = memberships || [];
+    let chosen = preferredCompanyId
+        ? rows.find((r) => r.company_id === preferredCompanyId)
+        : null;
+
+    // Fallbacks: Stripe-ready company, then newest membership.
+    if (!chosen) {
+        chosen = rows.find((r) => !!(r.companies as any)?.stripe_account_id) || rows[0] || null;
+    }
+
+    // Employee portal user with no company_users row — resolve via employees → companies.
+    if (!chosen && preferredCompanyId) {
+        const { data: company } = await supabase
+            .from("companies")
+            .select("*")
+            .eq("id", preferredCompanyId)
+            .single();
+        if (company) {
+            return {
+                id: company.id,
+                admin_email: adminEmail,
+                _membershipRole: "employee",
+                ...company,
+            };
+        }
+    }
+
+    if (!chosen?.companies) throw new Error("Company not found for user");
+
+    return {
+        id:          chosen.company_id,
+        admin_email: adminEmail,
+        _membershipRole: (chosen.role as string) || "member",
+        ...(chosen.companies as Record<string, unknown>),
+    };
+}
+
 async function sendEmail(opts: { to: string; subject: string; html: string }) {
     if (!RESEND_API_KEY) return;
     const resp = await fetch("https://api.resend.com/emails", {
