@@ -3835,7 +3835,7 @@ function renderOnboardingView(state) {
         <div class="card" style="margin-top:24px; padding:24px;">
             <div class="section-title">Onboarding Steps</div>
             <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-top:16px;">
-                ${['Personal Info', 'Role & Pay', 'Benefits Setup', 'Document Signing', 'IT Provisioning'].map((step, i) => `
+                ${['Personal Info', 'Role & Pay', 'Benefits Setup', 'Document Signing', 'Finish & Provision'].map((step, i) => `
                     <div style="text-align:center; padding:16px; background:var(--bg-tertiary); border-radius:var(--radius-md);">
                         <div style="width:32px;height:32px;border-radius:50%;background:var(--primary-light);color:var(--primary);font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px;">${i+1}</div>
                         <div style="font-size:12px;font-weight:600;">${step}</div>

@@ -775,7 +775,7 @@ const AeroApp = {
                     </div>
                 </div>
                 <p style="font-size:12px;color:var(--text-tertiary);margin-top:12px;">
-                    This adds them to the onboarding pipeline. Use Employees → Onboard Staff to create their payroll record when ready.
+                    This adds them to the onboarding pipeline. Continue opens a 5-step wizard (personal info, pay, benefits, documents, finish) and can create their payroll employee record.
                 </p>
                 <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
                     <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Cancel</button>
@@ -794,7 +794,7 @@ const AeroApp = {
             role:      document.getElementById('hireRole').value.trim(),
             department: document.getElementById('hireDept').value,
             startDate: document.getElementById('hireStartDate').value,
-            status:    'pending-docs',
+            status:    'in-progress',
         };
         if (!hire.name || !hire.email || !hire.role) {
             return this.showToast('Please fill in name, email, and role.', 'warning');
@@ -806,78 +806,449 @@ const AeroApp = {
             this.closeModal();
             this.showToast(`${hire.name} added to onboarding`, 'success');
             this.navigateTo('onboarding');
+            this.openOnboardingWizard(created.id);
         } catch (err) {
             console.error('[AeroApp] handleAddNewHire:', err);
             this.showToast('Failed to add hire: ' + (err.message || String(err)), 'danger');
         }
     },
 
+    _onboardingSteps: [
+        'Personal Info',
+        'Role & Pay',
+        'Benefits Setup',
+        'Document Signing',
+        'Finish & Provision',
+    ],
+
+    _onboardingStateOptions: function(selected) {
+        const states = [
+            ['CA', 'California (CA)'], ['NY', 'New York (NY)'], ['TX', 'Texas (TX)'],
+            ['FL', 'Florida (FL)'], ['CO', 'Colorado (CO)'], ['IL', 'Illinois (IL)'],
+            ['WA', 'Washington (WA)'], ['GA', 'Georgia (GA)'], ['NC', 'North Carolina (NC)'],
+            ['AZ', 'Arizona (AZ)'], ['OTHER', 'Other / Remote'],
+        ];
+        return states.map(([v, l]) =>
+            `<option value="${v}" ${selected === v ? 'selected' : ''}>${l}</option>`
+        ).join('');
+    },
+
+    _onboardingStepForm: function(hire) {
+        const esc = (s) => String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;');
+        const d = hire.formData || {};
+        const step = hire.step || 1;
+        const is1099 = (d.classification || 'w2') === '1099';
+        const rateLabel = (d.type || 'salaried') === 'hourly' ? 'Hourly Pay Rate ($)' : 'Annual Salary ($)';
+
+        if (step === 1) {
+            return `
+                <div class="form-grid">
+                    <div class="form-group col-span-2">
+                        <label for="obName">Full Legal Name</label>
+                        <input type="text" class="form-control" id="obName" required value="${esc(d.name || hire.name || '')}">
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label for="obEmail">Work Email</label>
+                        <input type="email" class="form-control" id="obEmail" required value="${esc(d.email || hire.email || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="obPhone">Phone</label>
+                        <input type="tel" class="form-control" id="obPhone" value="${esc(d.phone || '')}" placeholder="(555) 555-5555">
+                    </div>
+                    <div class="form-group">
+                        <label for="obStartDate">Start Date</label>
+                        <input type="date" class="form-control" id="obStartDate" required value="${esc(d.startDate || hire.startDateIso || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="obState">Tax Residence State</label>
+                        <select class="form-control" id="obState">${this._onboardingStateOptions(d.state || 'CA')}</select>
+                    </div>
+                    <div class="form-group">
+                        <label for="obAddress">Home Address (optional)</label>
+                        <input type="text" class="form-control" id="obAddress" value="${esc(d.address || '')}" placeholder="Street, City, ZIP">
+                    </div>
+                </div>`;
+        }
+
+        if (step === 2) {
+            return `
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="obRole">Role / Title</label>
+                        <input type="text" class="form-control" id="obRole" required value="${esc(d.role || hire.role || '')}">
+                    </div>
+                    <div class="form-group">
+                        <label for="obDept">Department</label>
+                        <select class="form-control" id="obDept">
+                            ${['Engineering','Sales & Marketing','Customer Support','Product Design','Operations & HR'].map(dep =>
+                                `<option value="${dep}" ${(d.department || hire.department) === dep ? 'selected' : ''}>${dep}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="obClass">Staff Classification</label>
+                        <select class="form-control" id="obClass" onchange="AeroApp._toggleOnboardingClassFields()">
+                            <option value="w2" ${!is1099 ? 'selected' : ''}>W-2 Employee</option>
+                            <option value="1099" ${is1099 ? 'selected' : ''}>1099 Contractor</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="obType">Compensation Type</label>
+                        <select class="form-control" id="obType" onchange="AeroApp.toggleRateLabels(this, 'obRateLabel')">
+                            <option value="salaried" ${(d.type || 'salaried') === 'salaried' ? 'selected' : ''}>Salaried / Flat Rate</option>
+                            <option value="hourly" ${d.type === 'hourly' ? 'selected' : ''}>Hourly Basis</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="obRate" id="obRateLabel">${rateLabel}</label>
+                        <input type="number" step="any" class="form-control" id="obRate" required value="${esc(d.rate != null ? d.rate : '')}" placeholder="e.g. 75000">
+                    </div>
+                    <div class="form-group">
+                        <label for="obFreq">Pay Frequency</label>
+                        <select class="form-control" id="obFreq">
+                            <option value="biweekly" ${(d.payFrequency || 'biweekly') === 'biweekly' ? 'selected' : ''}>Biweekly (26)</option>
+                            <option value="weekly" ${d.payFrequency === 'weekly' ? 'selected' : ''}>Weekly (52)</option>
+                            <option value="semimonthly" ${d.payFrequency === 'semimonthly' ? 'selected' : ''}>Semimonthly (24)</option>
+                            <option value="monthly" ${d.payFrequency === 'monthly' ? 'selected' : ''}>Monthly (12)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="obFilingGroup" style="${is1099 ? 'display:none' : ''}">
+                        <label for="obFiling">W-4 Filing Status</label>
+                        <select class="form-control" id="obFiling">
+                            <option value="single" ${(d.filingStatus || 'single') === 'single' ? 'selected' : ''}>Single</option>
+                            <option value="married" ${d.filingStatus === 'married' ? 'selected' : ''}>Married Filing Jointly</option>
+                        </select>
+                    </div>
+                </div>`;
+        }
+
+        if (step === 3) {
+            return `
+                <div class="form-grid">
+                    <p class="col-span-2" style="font-size:13px;color:var(--text-secondary);margin:0 0 4px;">
+                        ${is1099 ? 'Contractors typically skip W-2 benefits — leave at 0 unless you offer them.' : 'Set default benefits for payroll deductions. You can change these later on the employee record.'}
+                    </p>
+                    <div class="form-group">
+                        <label for="ob401k">Pre-tax 401(k) Rate (%)</label>
+                        <input type="number" step="0.1" class="form-control" id="ob401k" value="${d.rate401k != null ? d.rate401k : (is1099 ? 0 : 4)}">
+                    </div>
+                    <div class="form-group">
+                        <label for="obMedical">Health premium ($ per run)</label>
+                        <input type="number" step="any" class="form-control" id="obMedical" value="${d.medicalPremium != null ? d.medicalPremium : (is1099 ? 0 : 80)}">
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label for="obReimbursement">Travel / Expense Reimbursement ($ per run)</label>
+                        <input type="number" step="any" class="form-control" id="obReimbursement" value="${d.reimbursement != null ? d.reimbursement : 0}">
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label for="obBenefitsNotes">Benefits notes (optional)</label>
+                        <textarea class="form-control" id="obBenefitsNotes" rows="2" placeholder="Waiting on plan election, dependents, etc.">${esc(d.benefitsNotes || '')}</textarea>
+                    </div>
+                </div>`;
+        }
+
+        if (step === 4) {
+            return `
+                <div style="display:flex;flex-direction:column;gap:14px;">
+                    <p style="font-size:13px;color:var(--text-secondary);margin:0;">
+                        Confirm required new-hire documents. (This records HR attestation in GlidePay — attach signed PDFs in your HRIS if needed.)
+                    </p>
+                    <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;">
+                        <input type="checkbox" id="obDocI9" ${d.docI9 ? 'checked' : ''} style="margin-top:3px;">
+                        <span><strong>Form I-9</strong> — identity and employment authorization collected / verified</span>
+                    </label>
+                    <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;${is1099 ? 'opacity:0.55;' : ''}">
+                        <input type="checkbox" id="obDocW4" ${d.docW4 || is1099 ? 'checked' : ''} ${is1099 ? 'disabled' : ''} style="margin-top:3px;">
+                        <span><strong>Form W-4</strong> — federal withholding elections on file ${is1099 ? '(N/A for 1099)' : ''}</span>
+                    </label>
+                    <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;">
+                        <input type="checkbox" id="obDocHandbook" ${d.docHandbook ? 'checked' : ''} style="margin-top:3px;">
+                        <span><strong>Company handbook / policies</strong> — acknowledged by new hire</span>
+                    </label>
+                    <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;">
+                        <input type="checkbox" id="obDocDirectDeposit" ${d.docDirectDeposit ? 'checked' : ''} style="margin-top:3px;">
+                        <span><strong>Direct deposit authorization</strong> — bank link can finish later under Employees</span>
+                    </label>
+                    <div class="form-group" style="margin:0;">
+                        <label for="obDocNotes">Document notes (optional)</label>
+                        <textarea class="form-control" id="obDocNotes" rows="2">${esc(d.docNotes || '')}</textarea>
+                    </div>
+                </div>`;
+        }
+
+        // Step 5 — finish
+        const alreadyEmp = !!hire.employeeId;
+        return `
+            <div style="display:flex;flex-direction:column;gap:14px;">
+                <div style="padding:14px;background:var(--bg-tertiary);border-radius:var(--radius-md);font-size:13px;line-height:1.5;">
+                    <div><strong>${d.name || hire.name}</strong> · ${d.role || hire.role}</div>
+                    <div style="color:var(--text-secondary);">${d.email || hire.email} · ${d.department || hire.department}</div>
+                    <div style="color:var(--text-tertiary);margin-top:6px;">
+                        ${(d.classification || 'w2').toUpperCase()} · ${d.type || 'salaried'} ·
+                        $${Number(d.rate || 0).toLocaleString()} · ${d.payFrequency || 'biweekly'} · ${d.state || '—'}
+                    </div>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label for="obItNotes">IT / access notes</label>
+                    <textarea class="form-control" id="obItNotes" rows="2" placeholder="Laptop, email, Slack, tools…">${esc(d.itNotes || '')}</textarea>
+                </div>
+                <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;">
+                    <input type="checkbox" id="obCreateEmployee" ${alreadyEmp || d.createEmployee !== false ? 'checked' : ''} ${alreadyEmp ? 'disabled' : ''} style="margin-top:3px;">
+                    <span>
+                        <strong>Create payroll employee record</strong>
+                        ${alreadyEmp
+                            ? ' — already created for this hire'
+                            : ' — adds them under Employees so you can run payroll and link a bank account'}
+                    </span>
+                </label>
+            </div>`;
+    },
+
+    _toggleOnboardingClassFields: function() {
+        const cls = document.getElementById('obClass')?.value;
+        const filing = document.getElementById('obFilingGroup');
+        if (filing) filing.style.display = cls === '1099' ? 'none' : '';
+    },
+
+    _readOnboardingStepFields: function(step) {
+        const val = (id) => document.getElementById(id)?.value?.trim() ?? '';
+        const num = (id) => {
+            const n = parseFloat(document.getElementById(id)?.value);
+            return Number.isFinite(n) ? n : 0;
+        };
+        const checked = (id) => !!document.getElementById(id)?.checked;
+
+        if (step === 1) {
+            return {
+                name: val('obName'),
+                email: val('obEmail'),
+                phone: val('obPhone'),
+                startDate: val('obStartDate'),
+                state: val('obState') || 'CA',
+                address: val('obAddress'),
+            };
+        }
+        if (step === 2) {
+            return {
+                role: val('obRole'),
+                department: val('obDept'),
+                classification: val('obClass') || 'w2',
+                type: val('obType') || 'salaried',
+                rate: num('obRate'),
+                payFrequency: val('obFreq') || 'biweekly',
+                filingStatus: val('obFiling') || 'single',
+            };
+        }
+        if (step === 3) {
+            return {
+                rate401k: num('ob401k'),
+                medicalPremium: num('obMedical'),
+                reimbursement: num('obReimbursement'),
+                benefitsNotes: val('obBenefitsNotes'),
+            };
+        }
+        if (step === 4) {
+            return {
+                docI9: checked('obDocI9'),
+                docW4: checked('obDocW4'),
+                docHandbook: checked('obDocHandbook'),
+                docDirectDeposit: checked('obDocDirectDeposit'),
+                docNotes: val('obDocNotes'),
+            };
+        }
+        return {
+            itNotes: val('obItNotes'),
+            createEmployee: checked('obCreateEmployee'),
+        };
+    },
+
     openOnboardingWizard: function(id) {
         const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
         if (!hire) return this.showToast('Onboarding record not found.', 'warning');
 
-        const steps = ['Personal Info', 'Role & Pay', 'Benefits Setup', 'Document Signing', 'IT Provisioning'];
+        hire.step = hire.step || 1;
+        hire.totalSteps = hire.totalSteps || 5;
+        hire.formData = hire.formData || {};
+
+        const steps = this._onboardingSteps;
         const stepCards = steps.map((label, i) => {
             const n = i + 1;
-            const done = n < hire.step;
-            const current = n === hire.step;
+            const done = n < hire.step || hire.status === 'complete';
+            const current = n === hire.step && hire.status !== 'complete';
             const bg = done ? 'var(--success-light, #dcfce7)' : current ? 'var(--primary-light)' : 'var(--bg-tertiary)';
             const color = done ? 'var(--success)' : current ? 'var(--primary)' : 'var(--text-tertiary)';
             return `
-                <div style="padding:12px 14px;border-radius:var(--radius-md);background:${bg};border:1px solid ${current ? 'var(--primary)' : 'transparent'};">
+                <button type="button" onclick="AeroApp.jumpOnboardingStep('${hire.id}', ${n})"
+                    style="text-align:left;padding:10px 12px;border-radius:var(--radius-md);background:${bg};border:1px solid ${current ? 'var(--primary)' : 'var(--border-color)'};cursor:pointer;">
                     <div style="font-size:11px;font-weight:700;color:${color};">STEP ${n}</div>
                     <div style="font-size:13px;font-weight:600;margin-top:2px;">${label}</div>
-                    <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">${done ? 'Complete' : current ? 'In progress' : 'Upcoming'}</div>
-                </div>`;
+                </button>`;
         }).join('');
 
-        const canAdvance = hire.step < hire.totalSteps && hire.status !== 'complete';
+        const isComplete = hire.status === 'complete';
         const body = `
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:14px;">
                 <div style="font-weight:700;font-size:16px;">${hire.name}</div>
-                <div style="font-size:13px;color:var(--text-secondary);">${hire.role} · ${hire.department}</div>
-                <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Start date: ${hire.startDate || 'TBD'} · ${hire.email}</div>
+                <div style="font-size:13px;color:var(--text-secondary);">${hire.role || 'Role TBD'} · ${hire.department || ''}</div>
+                <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Start: ${hire.startDate || 'TBD'} · ${hire.email}</div>
             </div>
-            <div style="display:grid;gap:8px;margin-bottom:20px;">${stepCards}</div>
-            <div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
-                <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Close</button>
-                ${canAdvance ? `<button type="button" class="btn btn-primary" onclick="AeroApp.advanceOnboardingStep('${hire.id}')">Mark Step ${hire.step} Complete</button>` : ''}
-                ${hire.status !== 'complete' ? `<button type="button" class="btn btn-outline" onclick="AeroApp.completeOnboarding('${hire.id}')">Mark Fully Complete</button>` : ''}
-            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px;">${stepCards}</div>
+            ${isComplete ? `
+                <div style="padding:14px;background:var(--success-light,#dcfce7);border-radius:var(--radius-md);margin-bottom:16px;font-size:14px;">
+                    Onboarding complete${hire.employeeId ? ' — payroll employee record exists.' : '.'}
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:12px;">
+                    <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Close</button>
+                    ${hire.employeeId ? `<button type="button" class="btn btn-primary" onclick="AeroApp.closeModal();AeroApp.navigateTo('employees')">View Employees</button>` : ''}
+                </div>
+            ` : `
+                <form id="onboardingStepForm" onsubmit="AeroApp.saveOnboardingStep(event, '${hire.id}')">
+                    <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--primary);">
+                        Step ${hire.step}: ${steps[hire.step - 1] || ''}
+                    </div>
+                    ${this._onboardingStepForm(hire)}
+                    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:22px;">
+                        <button type="button" class="btn btn-secondary" onclick="AeroApp.closeModal()">Close</button>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                            ${hire.step > 1 ? `<button type="button" class="btn btn-outline" onclick="AeroApp.jumpOnboardingStep('${hire.id}', ${hire.step - 1})">Back</button>` : ''}
+                            <button type="submit" class="btn btn-primary">
+                                ${hire.step >= hire.totalSteps ? 'Finish Onboarding' : 'Save & Continue'}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            `}
         `;
-        this.openModal('Onboarding Progress', body, true);
+        this.openModal('Employee Onboarding', body, true);
     },
 
-    advanceOnboardingStep: async function(id) {
+    jumpOnboardingStep: async function(id, step) {
+        const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
+        if (!hire || hire.status === 'complete') return;
+        const target = Math.max(1, Math.min(step, hire.totalSteps || 5));
+        // Allow revisiting completed steps or the current one; block jumping ahead more than +0 beyond saved progress unless already past
+        const maxOpen = Math.max(hire.step || 1, 1);
+        if (target > maxOpen) {
+            return this.showToast('Finish the current step before jumping ahead.', 'warning');
+        }
+        hire.step = target;
+        this.openOnboardingWizard(id);
+    },
+
+    saveOnboardingStep: async function(e, id) {
+        e.preventDefault();
         const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
         if (!hire) return;
-        const nextStep = Math.min(hire.step + 1, hire.totalSteps);
-        const status = nextStep >= hire.totalSteps ? 'complete' : (nextStep >= 4 ? 'pending-docs' : 'in-progress');
+
+        const step = hire.step || 1;
+        const patch = this._readOnboardingStepFields(step);
+
+        if (step === 1) {
+            if (!patch.name || !patch.email || !patch.startDate) {
+                return this.showToast('Name, email, and start date are required.', 'warning');
+            }
+        }
+        if (step === 2) {
+            if (!patch.role || !patch.rate || patch.rate <= 0) {
+                return this.showToast('Role and a valid pay rate are required.', 'warning');
+            }
+        }
+        if (step === 4) {
+            const is1099 = (hire.formData?.classification || patch.classification || 'w2') === '1099';
+            if (!patch.docI9 || !patch.docHandbook || (!is1099 && !patch.docW4)) {
+                return this.showToast('Confirm the required document checkboxes before continuing.', 'warning');
+            }
+        }
+
+        const formData = { ...(hire.formData || {}), ...patch };
+        const nextStep = Math.min(step + 1, hire.totalSteps || 5);
+        const finishing = step >= (hire.totalSteps || 5);
+        const status = finishing ? 'complete' : (nextStep >= 4 ? 'pending-docs' : 'in-progress');
+
         try {
-            await AeroDB.updateOnboardingStatus(id, { step: nextStep, status });
-            hire.step = nextStep;
-            hire.status = status;
-            this.showToast(status === 'complete' ? `${hire.name} onboarding complete` : `Advanced to step ${nextStep}`, 'success');
-            this.openOnboardingWizard(id);
-            this.navigateTo('onboarding');
+            let employeeId = hire.employeeId || null;
+
+            if (finishing && formData.createEmployee !== false && !employeeId) {
+                const existing = (this.state.employees || []).find(
+                    (emp) => (emp.email || '').toLowerCase() === (formData.email || hire.email || '').toLowerCase()
+                );
+                if (existing) {
+                    employeeId = existing.id;
+                } else {
+                    const created = await AeroDB.addEmployee({
+                        name: formData.name || hire.name,
+                        email: formData.email || hire.email,
+                        role: formData.role || hire.role,
+                        department: formData.department || hire.department,
+                        state: formData.state || 'CA',
+                        classification: formData.classification || 'w2',
+                        type: formData.type || 'salaried',
+                        rate: Number(formData.rate) || 0,
+                        payFrequency: formData.payFrequency || 'biweekly',
+                        filingStatus: formData.filingStatus || 'single',
+                        benefits: {
+                            rate401k: Number(formData.rate401k) || 0,
+                            medicalPremium: Number(formData.medicalPremium) || 0,
+                            reimbursement: Number(formData.reimbursement) || 0,
+                        },
+                    });
+                    if (!this.state.employees) this.state.employees = [];
+                    this.state.employees.push(created);
+                    employeeId = created.id;
+                    if (typeof AeroBilling !== 'undefined') {
+                        AeroBilling.updateSeatCount(this.state.employees.length);
+                    }
+                }
+            }
+
+            const updated = await AeroDB.updateOnboardingStatus(id, {
+                step: finishing ? (hire.totalSteps || 5) : nextStep,
+                status,
+                name: formData.name || hire.name,
+                email: formData.email || hire.email,
+                role: formData.role || hire.role,
+                department: formData.department || hire.department,
+                startDate: formData.startDate || hire.startDateIso || null,
+                formData,
+                employeeId,
+            });
+
+            const idx = (this.state.onboardingQueue || []).findIndex(h => h.id === id);
+            if (idx >= 0) this.state.onboardingQueue[idx] = updated;
+
+            if (finishing) {
+                this.closeModal();
+                this.showToast(
+                    employeeId
+                        ? `${updated.name} onboarded and added to Employees`
+                        : `${updated.name} onboarding complete`,
+                    'success'
+                );
+                this.navigateTo(employeeId ? 'employees' : 'onboarding');
+            } else {
+                this.showToast(`Saved — continue to step ${nextStep}`, 'success');
+                this.openOnboardingWizard(id);
+                this.navigateTo('onboarding');
+            }
         } catch (err) {
-            this.showToast('Failed to update: ' + (err.message || String(err)), 'danger');
+            console.error('[AeroApp] saveOnboardingStep:', err);
+            this.showToast('Failed to save onboarding: ' + (err.message || String(err)), 'danger');
         }
     },
 
-    completeOnboarding: async function(id) {
+    // Kept for any leftover UI hooks; opens the real wizard.
+    advanceOnboardingStep: function(id) {
+        this.openOnboardingWizard(id);
+    },
+
+    completeOnboarding: function(id) {
         const hire = (this.state.onboardingQueue || []).find(h => h.id === id);
         if (!hire) return;
-        try {
-            await AeroDB.updateOnboardingStatus(id, { step: hire.totalSteps, status: 'complete' });
-            hire.step = hire.totalSteps;
-            hire.status = 'complete';
-            this.closeModal();
-            this.showToast(`${hire.name} marked complete`, 'success');
-            this.navigateTo('onboarding');
-        } catch (err) {
-            this.showToast('Failed to complete: ' + (err.message || String(err)), 'danger');
-        }
+        hire.step = hire.totalSteps || 5;
+        this.openOnboardingWizard(id);
     },
 
     // --- Employee Directory Handlers ---
