@@ -3789,9 +3789,6 @@ function renderOnboardingView(state) {
         </div>
     `;
 }
-        </div>
-    `;
-}
 
 // B. Employee Directory View
 function renderDirectoryView(state) {
