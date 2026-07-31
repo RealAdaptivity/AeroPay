@@ -183,16 +183,35 @@ async function handleConfirmSetup(userId: string, body: {
 // ── Disburse ──────────────────────────────────────────────────────────────────
 async function handleDisburse(userId: string, body: {
     payrollRunId:   string;
-    disbursements:  Array<{ employeeId: string; netPayCents: number }>;
+    disbursements?: Array<{ employeeId: string; netPayCents: number }>;
 }) {
     const company            = await getCompany(userId);
     const financialAccountId = company.stripe_financial_account_id as string | undefined;
     const connectedAccountId = company.stripe_account_id as string | undefined;
     const now                = Date.now();
 
+    if (!body.payrollRunId) {
+        return json({ error: "payrollRunId is required" }, 400);
+    }
+
+    // Prefer explicit disbursements from the client; otherwise load net pay from line items.
+    let disbursements = Array.isArray(body.disbursements) ? body.disbursements : [];
+    if (!disbursements.length) {
+        const { data: lines, error: lineErr } = await supabase
+            .from("payroll_line_items")
+            .select("employee_id, net_pay")
+            .eq("payroll_run_id", body.payrollRunId)
+            .eq("company_id", company.id);
+        if (lineErr) throw new Error(lineErr.message);
+        disbursements = (lines || []).map((li) => ({
+            employeeId:  li.employee_id as string,
+            netPayCents: Math.round(Number(li.net_pay || 0) * 100),
+        }));
+    }
+
     const results: Array<{ employeeId: string; status: string; transferId?: string; heldUntil?: string }> = [];
 
-    for (const d of body.disbursements) {
+    for (const d of disbursements) {
         if (d.netPayCents <= 0) continue;
 
         const { data: emp } = await supabase
