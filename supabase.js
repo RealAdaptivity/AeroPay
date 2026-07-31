@@ -1019,28 +1019,45 @@ const AeroDB = {
     // ONBOARDING
     // ─────────────────────────────────────────
 
+    _mapOnboardingRow(r) {
+        return {
+            id:         r.id,
+            name:       r.name,
+            email:      r.email,
+            role:       r.role,
+            department: r.department,
+            startDate:  r.start_date
+                ? new Date(r.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+                : '',
+            startDateIso: r.start_date || '',
+            status:       r.status,
+            step:         r.step || 1,
+            totalSteps:   r.total_steps || 5,
+            formData:     r.form_data || {},
+            employeeId:   r.employee_id || null,
+        };
+    },
+
     /** Return the onboarding queue for the current company. */
     async getOnboardingQueue() {
         const rows = _check(
             await _sb.from('onboarding_queue').select('*').order('created_at', { ascending: false }),
             'getOnboardingQueue'
         );
-        return rows.map(r => ({
-            id:          r.id,
-            name:        r.name,
-            email:       r.email,
-            role:        r.role,
-            department:  r.department,
-            startDate:   r.start_date ? new Date(r.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
-            status:      r.status,
-            step:        r.step,
-            totalSteps:  r.total_steps,
-        }));
+        return rows.map((r) => this._mapOnboardingRow(r));
     },
 
     /** Add a new hire to the onboarding queue. Returns the created hire in app shape. */
     async addToOnboarding(hire) {
         const company = await this.getCompany();
+        const formData = {
+            name: hire.name,
+            email: hire.email,
+            role: hire.role,
+            department: hire.department,
+            startDate: hire.startDate || '',
+            ...(hire.formData || {}),
+        };
         const row = _check(
             await _sb.from('onboarding_queue').insert({
                 company_id:  company.id,
@@ -1049,37 +1066,40 @@ const AeroDB = {
                 role:        hire.role,
                 department:  hire.department,
                 start_date:  hire.startDate || null,
-                status:      hire.status || 'pending-docs',
+                status:      hire.status || 'in-progress',
                 step:        1,
                 total_steps: 5,
+                form_data:   formData,
             }).select().single(),
             'addToOnboarding'
         );
         await this.addAuditLog('New Hire Added', `Added ${hire.name} to onboarding queue`, 'employee').catch(() => {});
-        return {
-            id:         row.id,
-            name:       row.name,
-            email:      row.email,
-            role:       row.role,
-            department: row.department,
-            startDate:  row.start_date
-                ? new Date(row.start_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-                : '',
-            status:     row.status,
-            step:       row.step,
-            totalSteps: row.total_steps,
-        };
+        return this._mapOnboardingRow(row);
     },
 
-    /** Advance or update a hire's onboarding step/status. */
+    /**
+     * Update onboarding step/status and optionally merge form_data / core fields.
+     * Returns the updated hire in app shape.
+     */
     async updateOnboardingStatus(id, fields) {
-        _check(
-            await _sb.from('onboarding_queue').update({
-                status: fields.status,
-                step:   fields.step,
-            }).eq('id', id),
+        const patch = {
+            updated_at: new Date().toISOString(),
+        };
+        if (fields.status != null) patch.status = fields.status;
+        if (fields.step != null) patch.step = fields.step;
+        if (fields.name != null) patch.name = fields.name;
+        if (fields.email != null) patch.email = fields.email;
+        if (fields.role != null) patch.role = fields.role;
+        if (fields.department != null) patch.department = fields.department;
+        if (fields.startDate !== undefined) patch.start_date = fields.startDate || null;
+        if (fields.employeeId !== undefined) patch.employee_id = fields.employeeId;
+        if (fields.formData) patch.form_data = fields.formData;
+
+        const row = _check(
+            await _sb.from('onboarding_queue').update(patch).eq('id', id).select().single(),
             'updateOnboardingStatus'
         );
+        return this._mapOnboardingRow(row);
     },
 
     // ─────────────────────────────────────────
