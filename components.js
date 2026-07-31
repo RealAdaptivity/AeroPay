@@ -511,14 +511,33 @@ function renderDashboardView(state) {
     const completedRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
     const ytdGross = completedRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
     const ytdTax = completedRuns.reduce((sum, run) => sum + run.employerTaxes, 0);
-    
+    const ap = state.settings?.autopilot || {
+        enabled: false, mode: 'reminder', frequency: 'biweekly',
+        dayOfWeek: 5, dayOfMonth: 1, nextRun: null, lastRun: null, reminderDaysBefore: 2,
+    };
+    const nextRunIso = typeof computeNextAutopilotRun === 'function' ? computeNextAutopilotRun(ap) : ap.nextRun;
+    const daysLeft = typeof daysUntilDate === 'function' ? daysUntilDate(nextRunIso) : null;
+    const nextRunLabel = nextRunIso
+        ? new Date(nextRunIso + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        : null;
+    const modeLabel = ap.mode === 'auto_submit' ? 'auto-submit for approval' : 'send a reminder';
+    const freqLabel = ({ weekly: 'weekly', biweekly: 'biweekly', semimonthly: 'semi-monthly', monthly: 'monthly' })[ap.frequency] || ap.frequency;
+    const bannerTitle = ap.enabled ? 'Smart Autopilot Enabled' : 'Smart Autopilot Off';
+    const bannerDesc = ap.enabled
+        ? (daysLeft === 0
+            ? `Next ${freqLabel} payroll is today (${nextRunLabel}). GlidePay will ${modeLabel}.`
+            : daysLeft != null
+                ? `Next ${freqLabel} payroll in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${nextRunLabel}). GlidePay will ${modeLabel}.`
+                : `GlidePay will ${modeLabel} on your ${freqLabel} schedule.`)
+        : 'Turn on Autopilot to schedule reminders or auto-submit payroll runs on your pay cadence.';
+
     return `
         <div class="autopilot-banner">
             <div class="autopilot-details">
-                <span class="autopilot-title">Smart Autopilot Enabled</span>
-                <span class="autopilot-desc">GlidePay is set to auto-process your next payroll in 6 days. Standard deductions and timesheet hours will be synced automatically.</span>
+                <span class="autopilot-title">${bannerTitle}</span>
+                <span class="autopilot-desc">${bannerDesc}</span>
             </div>
-            <button class="btn btn-primary" onclick="AeroApp.showToast('Autopilot options configured!', 'success')">Configure</button>
+            <button class="btn btn-primary" onclick="AeroApp.openAutopilotConfig()">Configure</button>
         </div>
 
         <div class="grid-stats">
