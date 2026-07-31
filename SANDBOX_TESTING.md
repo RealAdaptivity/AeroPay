@@ -25,7 +25,7 @@ Sandbox publishable key + price IDs are set for **GlidePay Test** (`acct_1TkoXCA
 
 - Base: `price_1TzIdaAsgAzfeB6DKeordaY7` ($29/mo)
 - Seat: `price_1TzIdbAsgAzfeB6D0GyWkgXK` ($4/mo, metadata `type=per_seat`)
-- Test webhook registered → `…/functions/v1/stripe-webhook` (Connect events on; Treasury events pending Treasury activation)
+- Test webhook registered → `…/functions/v1/stripe-webhook` (Connect + Treasury outbound transfer events)
 
 When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
 
