@@ -82,6 +82,19 @@ supabase functions deploy stripe-webhook --no-verify-jwt
 supabase functions deploy file-tax
 ```
 
+### 3b. TaxBandit e-file (sandbox)
+
+1. Copy `taxbandit.env.example` → `.local/taxbandit.env`
+2. Paste **Client ID**, **Client Secret**, and **User Token** from https://sandbox.taxbandits.com → Settings → API Credentials
+3. Push secrets and redeploy:
+
+```bash
+bash scripts/set-taxbandit-secrets.sh
+npx supabase functions deploy file-tax --project-ref ojvnxnlrghatkwjrlnop
+```
+
+Then Tax Compliance → **E-File** on Form 941 / 940 / W-2 / 1099-NEC.
+
 ---
 
 ## Step 4 — Register the test webhook endpoint
