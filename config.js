@@ -25,11 +25,11 @@ const AeroConfig = (() => {
               : "live";
 
     // ── Sandbox (test-mode) config ────────────────────────────────────────────
-    // GlidePay Test sandbox (acct …TkoXC…). Price IDs: paste from Dashboard → Products.
+    // GlidePay Test sandbox — acct_1TkoXCAsgAzfeB6D
     const SANDBOX = {
         stripePublishableKey: "pk_test_51TkoXCAsgAzfeB6D4ktKPKED969ZbEemhjEfXoEybDqh45GFfm5Oflziwkc4QLwfc1IaTNvCojYBqNpRrIMz2Mck00uHoKZHlZ",
-        priceBaseId:          "price_REPLACE_WITH_GLIDEPAY_TEST_BASE",
-        priceSeatId:          "price_REPLACE_WITH_GLIDEPAY_TEST_SEAT",
+        priceBaseId:          "price_1TzIdaAsgAzfeB6DKeordaY7",
+        priceSeatId:          "price_1TzIdbAsgAzfeB6D0GyWkgXK",
         supabaseUrl:          "https://ojvnxnlrghatkwjrlnop.supabase.co",
         // Edge functions are the same URL; secrets on the Supabase side switch
         // between live and test keys via `supabase secrets set`.
