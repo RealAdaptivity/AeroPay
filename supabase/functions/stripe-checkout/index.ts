@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe Checkout Edge Function
+ * GlidePay — Stripe Checkout Edge Function
  * supabase/functions/stripe-checkout/index.ts
  *
  * Deploy:
@@ -75,6 +75,14 @@ async function handleCheckout(userId: string, body: any) {
         stripeCustomerId = customer.id;
     }
 
+    const trialDays = Number(body.trialDays ?? 14);
+    const subscriptionData: Record<string, unknown> = {
+        metadata: { company_id: companyId },
+    };
+    if (Number.isFinite(trialDays) && trialDays > 0) {
+        subscriptionData.trial_period_days = Math.floor(trialDays);
+    }
+
     const session = await stripe.checkout.sessions.create({
         customer:   stripeCustomerId,
         mode:       "subscription",
@@ -88,9 +96,7 @@ async function handleCheckout(userId: string, body: any) {
                 quantity: Math.max(1, employeeCount),
             },
         ],
-        subscription_data: {
-            metadata: { company_id: companyId },
-        },
+        subscription_data: subscriptionData,
         allow_promotion_codes: true,
         billing_address_collection: "required",
         success_url: successUrl,

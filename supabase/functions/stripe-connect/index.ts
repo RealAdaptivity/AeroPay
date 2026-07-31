@@ -1,5 +1,5 @@
 /**
- * AeroPay — Stripe Connect Edge Function
+ * GlidePay — Stripe Connect Edge Function
  * supabase/functions/stripe-connect/index.ts
  *
  * Deploy:
@@ -28,7 +28,7 @@ const CORS = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PLATFORM_URL = Deno.env.get("PLATFORM_URL") ?? "https://aeropay.io";
+const PLATFORM_URL = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
