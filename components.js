@@ -507,9 +507,10 @@ function renderSetupWizardView(state, step) {
 
 // 1. Render Dashboard
 function renderDashboardView(state) {
-    // Calculate total spend YTD
-    const ytdGross = state.payrollHistory.reduce((sum, run) => sum + run.grossPayroll, 0);
-    const ytdTax = state.payrollHistory.reduce((sum, run) => sum + run.employerTaxes, 0);
+    // Calculate total spend YTD (approved/completed runs only)
+    const completedRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
+    const ytdGross = completedRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
+    const ytdTax = completedRuns.reduce((sum, run) => sum + run.employerTaxes, 0);
     
     return `
         <div class="autopilot-banner">
@@ -668,21 +669,29 @@ function renderDashboardView(state) {
                         </tr>
                     </thead>
                     <tbody>
-                        ${state.payrollHistory.map(run => `
+                        ${state.payrollHistory.map(run => {
+                            const statusMap = {
+                                pending:   { badge: 'warning', label: 'Pending Approval' },
+                                rejected:  { badge: 'danger',  label: 'Rejected' },
+                                completed: { badge: 'success', label: 'Deposited' },
+                                approved:  { badge: 'success', label: 'Approved' },
+                            };
+                            const st = statusMap[run.status] || { badge: 'success', label: 'Deposited' };
+                            return `
                             <tr>
                                 <td style="font-weight:600;">${run.date}</td>
                                 <td>${run.employeeCount} employees</td>
                                 <td>${formatCurrency(run.grossPayroll)}</td>
                                 <td>${formatCurrency(run.employerTaxes)}</td>
                                 <td style="font-weight:700;color:var(--primary);">${formatCurrency(run.totalCost)}</td>
-                                <td><span class="badge badge-success">Deposited</span></td>
+                                <td><span class="badge badge-${st.badge}">${st.label}</span></td>
                                 <td>
                                     <button class="btn btn-sm-icon" onclick="AeroApp.showPayrollHistoryDetails('${run.id}')" title="View Details">
                                         <svg style="width:16px;height:16px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                     </button>
                                 </td>
-                            </tr>
-                        `).join('')}
+                            </tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
@@ -925,7 +934,7 @@ function renderRunPayrollView(state) {
                         Back
                     </button>
                     <button class="btn btn-success" onclick="AeroApp.submitPayrollRun()">
-                        Submit Payroll
+                        Submit for Approval
                         <svg style="width:16px;height:16px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"></path></svg>
                     </button>
                 </div>
@@ -1894,8 +1903,8 @@ function getPaystubHTML(employee, calcDetails, dateRange) {
 
 // 9. Generate Mock Form 941
 function getForm941HTML(state) {
-    // Aggregated numbers from all processed payroll history
-    const allRuns = state.payrollHistory;
+    // Aggregated numbers from completed/approved payroll history
+    const allRuns = (state.payrollHistory || []).filter(r => r.status === 'completed' || r.status === 'approved' || !r.status);
     const grossWages = allRuns.reduce((sum, run) => sum + run.grossPayroll, 0);
     const fitWithheld = allRuns.reduce((sum, run) => sum + (run.grossPayroll * 0.12), 0); // Est 12% average FIT
     const ssEmployee = allRuns.reduce((sum, run) => sum + (run.grossPayroll * 0.062), 0);
@@ -3985,14 +3994,17 @@ function renderBenefitsAdminView(state) {
 // E. Payroll Approvals View
 function renderApprovalsView(state) {
     const statusColors = { pending: 'warning', approved: 'success', rejected: 'danger' };
+    const approvals = state.payrollApprovals || [];
+    const advances  = state.payAdvances || [];
 
     let rows = '';
-    [...state.payrollApprovals].reverse().forEach(appr => {
-        const run = state.payrollHistory.find(r => r.id === appr.runId);
+    [...approvals].reverse().forEach(appr => {
+        const run = (state.payrollHistory || []).find(r => r.id === appr.runId);
         const statusColor = statusColors[appr.status] || 'primary';
+        const shortId = String(appr.runId || appr.id).slice(0, 8).toUpperCase();
         rows += `
             <tr>
-                <td style="font-weight:600;">${appr.runId.toUpperCase()}</td>
+                <td style="font-weight:600;">${shortId}</td>
                 <td>${run ? run.date : '—'}</td>
                 <td>${appr.employeeCount} employees</td>
                 <td style="font-weight:700;">${formatCurrency(appr.totalAmount)}</td>
@@ -4009,8 +4021,8 @@ function renderApprovalsView(state) {
             </tr>`;
     });
 
-    const pendingCount = state.payrollApprovals.filter(a=>a.status==='pending').length;
-    const approvedTotal = state.payrollApprovals.filter(a=>a.status==='approved').reduce((s,a)=>s+a.totalAmount,0);
+    const pendingCount = approvals.filter(a=>a.status==='pending').length;
+    const approvedTotal = approvals.filter(a=>a.status==='approved').reduce((s,a)=>s+a.totalAmount,0);
 
     return `
         <div class="grid-stats" style="margin-bottom:24px;">
@@ -4021,7 +4033,7 @@ function renderApprovalsView(state) {
             </div>
             <div class="card stat-card">
                 <span class="stat-label">Approved Payrolls (YTD)</span>
-                <span class="stat-value">${state.payrollApprovals.filter(a=>a.status==='approved').length}</span>
+                <span class="stat-value">${approvals.filter(a=>a.status==='approved').length}</span>
                 <span class="stat-trend up">Processed runs</span>
             </div>
             <div class="card stat-card">
@@ -4031,10 +4043,10 @@ function renderApprovalsView(state) {
             </div>
         </div>
         ${(() => {
-            const pendingAdvances = state.payAdvances.filter(a => a.status === 'pending');
+            const pendingAdvances = advances.filter(a => a.status === 'pending');
             let advanceRows = '';
             pendingAdvances.forEach(adv => {
-                const emp = state.employees.find(e => e.id === adv.empId);
+                const emp = (state.employees || []).find(e => e.id === adv.empId);
                 advanceRows += `
                     <tr>
                         <td style="padding: 12px 24px;">
