@@ -1,0 +1,18 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GlidePay">
+  <path d="M44.5 21
+           A 15 15 0 1 0 46.5 39.75"
+        stroke="#0F172A"
+        stroke-width="5.5"
+        stroke-linecap="round"
+        fill="none"/>
+  <path d="M46.5 39.75 H33.5"
+        stroke="#0F766E"
+        stroke-width="5.5"
+        stroke-linecap="round"/>
+  <path d="M37.5 36.5 L40.5 39.75 L46.5 32.5"
+        stroke="#14B8A6"
+        stroke-width="3.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        fill="none"/>
+</svg>

@@ -493,8 +493,8 @@ function renderSetupWizardView(state, step) {
     <div class="setup-wizard-wrap">
         <div class="setup-sidebar">
             <div class="setup-sidebar-brand">
-                <div style="width:36px;height:36px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));color:white;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-weight:700;font-family:var(--font-heading);font-size:16px;">G</div>
-                <span style="font-family:var(--font-heading);font-weight:700;font-size:18px;background:linear-gradient(135deg,var(--primary),var(--accent-purple));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">GlidePay</span>
+                <img src="assets/logo.svg" alt="" width="36" height="36" style="border-radius:8px;display:block;">
+                <span style="font-family:var(--font-heading);font-weight:700;font-size:18px;color:var(--brand-ink);letter-spacing:-0.02em;">GlidePay</span>
             </div>
             <div class="setup-progress-bar-wrap"><div class="setup-progress-bar-fill" style="width:${progressPct}%;"></div></div>
             <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:24px;">Step ${step} of ${steps.length}</p>
@@ -2296,7 +2296,7 @@ function renderLandingPageView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo">
-                    <div class="logo-box">G</div>
+                    <div class="logo-box"><img src="assets/logo.svg" alt="" width="40" height="40"></div>
                     <div class="logo-text">GlidePay</div>
                 </div>
                 <div>
@@ -2309,10 +2309,10 @@ function renderLandingPageView(state) {
 
             <main class="landing-hero-container">
                 <div class="landing-hero-text">
-                    <span class="landing-badge">Next-Gen Fintech</span>
-                    <h1 class="landing-title">The Smart <span>Compliance & Payroll Autopilot</span> for Modern Teams</h1>
+                    <span class="landing-badge">Compliance Ops</span>
+                    <h1 class="landing-title">GlidePay<br><span>Payroll control. Tax certainty.</span></h1>
                     <p class="landing-desc">
-                        GlidePay is the first automated payroll engine with built-in real-time tax calculation, same-day direct deposits, and instant ledger accounting integrations. Register, calculate, and e-file in all 50 states with zero human intervention.
+                        Run ACH payroll, transmit filings, and track tax deposits from one ops surface — built for teams that treat payday and compliance as the same job.
                     </p>
                     
                     <div class="landing-bullets">
@@ -2580,7 +2580,7 @@ function renderPrivacyPolicyView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
-                    <div class="logo-box">G</div>
+                    <div class="logo-box"><img src="assets/logo.svg" alt="" width="40" height="40"></div>
                     <div class="logo-text">GlidePay</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
@@ -2711,7 +2711,7 @@ function renderTermsOfServiceView(state) {
         <div class="landing-page">
             <header class="landing-header">
                 <div class="landing-logo" style="cursor:pointer;" onclick="AeroApp.navigateTo('landing')">
-                    <div class="logo-box">G</div>
+                    <div class="logo-box"><img src="assets/logo.svg" alt="" width="40" height="40"></div>
                     <div class="logo-text">GlidePay</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
