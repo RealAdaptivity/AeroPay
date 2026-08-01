@@ -146,6 +146,12 @@ async function handleSubmit(userId: string, body: {
         detail = (err as Error).message;
     }
 
+    // Sandbox re-file of the same EIN+quarter → treat as already filed, not a hard failure.
+    if (status === "error" && detail && /Duplicate Return/i.test(detail)) {
+        status = "submitted";
+        detail = `Already filed in TaxBandit for this EIN and quarter (${body.period}). Re-file skipped.`;
+    }
+
     const { data: updated } = await supabase
         .from("tax_filing_submissions")
         .update({
@@ -167,13 +173,14 @@ async function handleSubmit(userId: string, body: {
         category:    "payroll",
     });
 
+    // Always 200 with a status field — HTTP 502 hid TaxBandit validation messages in the UI.
     return json({
         submissionId:         row.id,
         providerSubmissionId,
         status,
         statusDetail:         detail,
         submission:           updated ?? row,
-    }, status === "error" ? 502 : 200);
+    }, 200);
 }
 
 // ── Get Status ────────────────────────────────────────────────────────────────

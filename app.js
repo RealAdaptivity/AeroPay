@@ -266,8 +266,10 @@ const AeroApp = {
 
         AeroDB.onAuthChange(async (event, session) => {
             // Skip during signUp — company rows are still being created; handleSignUp loads state after.
-            if (event === 'SIGNED_IN' && session) {
+            if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
                 if (AeroDB._signingUp) return;
+                // Token refresh / multi-tab sync re-emits SIGNED_IN — don't yank off Run Payroll.
+                if (this.session?.isLoggedIn) return;
                 await this._loadStateAndNavigate();
             } else if (event === 'SIGNED_OUT') {
                 this.state = {};
@@ -277,16 +279,68 @@ const AeroApp = {
         });
 
         const user = await AeroDB.getUser();
-        if (user) await this._loadStateAndNavigate();
+        if (user && !this.session?.isLoggedIn) await this._loadStateAndNavigate();
     },
 
     _loadStateAndNavigate: async function() {
         try {
-            this.state = await AeroDB.loadFullState();
             const user = await AeroDB.getUser();
-            const empRecord = this.state.employees.find(e => e.userId === user.id);
+            if (!user) return;
 
-            if (empRecord) {
+            // Login tab sets this; page refresh leaves it unset → infer from memberships.
+            const intent = sessionStorage.getItem('aeropay_login_role');
+            sessionStorage.removeItem('aeropay_login_role');
+
+            const empRecord = (typeof AeroDB.getMyEmployeeRecord === 'function')
+                ? await AeroDB.getMyEmployeeRecord()
+                : null;
+            const adminMemberships = (typeof AeroDB.getCompanyAdminMemberships === 'function')
+                ? await AeroDB.getCompanyAdminMemberships()
+                : [];
+            const hasCompanyAdmin = adminMemberships.length > 0;
+
+            let mode = null; // 'employee' | 'company'
+            if (intent === 'employee') {
+                if (!empRecord) {
+                    this.showToast('No Employee Portal access for this account. Ask your admin to invite you, or use the Company tab.', 'warning');
+                    await AeroDB.signOut();
+                    return;
+                }
+                mode = 'employee';
+            } else if (intent === 'company') {
+                if (!hasCompanyAdmin) {
+                    if (empRecord) {
+                        this.showToast('That account is for the Employee Portal — use the Employee tab to sign in.', 'warning');
+                    } else {
+                        this.showToast('No company admin access for this account. Register a company or use the Employee tab.', 'warning');
+                    }
+                    await AeroDB.signOut();
+                    return;
+                }
+                mode = 'company';
+            } else {
+                // Session restore: company admin wins only when they are not also a portal employee
+                // of a different active employer. Otherwise prefer the portal if that was last used.
+                const lastMode = localStorage.getItem('aeropay_last_mode');
+                if (lastMode === 'employee' && empRecord) mode = 'employee';
+                else if (lastMode === 'company' && hasCompanyAdmin) mode = 'company';
+                else if (hasCompanyAdmin && !empRecord) mode = 'company';
+                else if (empRecord) mode = 'employee';
+                else if (hasCompanyAdmin) mode = 'company';
+                else {
+                    this.showToast('This account has no company or employee portal access.', 'danger');
+                    await AeroDB.signOut();
+                    return;
+                }
+            }
+
+            localStorage.setItem('aeropay_last_mode', mode);
+
+            if (mode === 'employee') {
+                this.state = await AeroDB.loadFullState();
+                if (empRecord && !this.state.employees.some(e => e.id === empRecord.id)) {
+                    this.state.employees = [...this.state.employees, empRecord];
+                }
                 this.session = {
                     isLoggedIn: true,
                     role: 'employee',
@@ -296,6 +350,7 @@ const AeroApp = {
                 };
                 this.navigateTo('employee-dashboard');
             } else {
+                this.state = await AeroDB.loadFullState();
                 this.session = {
                     isLoggedIn: true,
                     role: 'company',
@@ -313,6 +368,7 @@ const AeroApp = {
                     this.navigateTo('dashboard');
                 }
             }
+
             this.populateW2Selectors();
             if (typeof AeroBilling !== 'undefined') {
                 // Employees never see subscription / free-trial banners.
@@ -502,7 +558,8 @@ const AeroApp = {
         if (this.session?.role === 'employee' && adminOnlyViews.includes(viewName)) {
             viewName = 'employee-dashboard';
         }
-        
+
+        const previousView = this.currentView;
         this.currentView = viewName;
         
         // Update Sidebar Active state
@@ -679,19 +736,22 @@ const AeroApp = {
         document.getElementById('mainViewContent').innerHTML = htmlContent;
 
         // Run post-renders (like drawing charts or filling active table logs)
-        this.postViewRender(viewName);
+        this.postViewRender(viewName, previousView);
         this.updateSidebarProfile();
     },
 
-    postViewRender: function(viewName) {
+    postViewRender: function(viewName, previousView) {
         if (viewName === 'dashboard') {
             renderSpendChart('spendHistoryChart', this.state.payrollHistory);
             renderHeadcountChart('headcountChart', this.state.payrollHistory);
             renderDeptSpendChart('deptSpendChart', this.state.employees, this.state.payrollHistory);
         }
         else if (viewName === 'payroll') {
-            this.currentWizardStep = 1;
-            this.wizardGoToStep(1);
+            // Soft re-renders must not wipe an in-progress payroll run.
+            if (previousView !== 'payroll') {
+                this.currentWizardStep = 1;
+            }
+            this.wizardGoToStep(this.currentWizardStep || 1);
         }
         else if (viewName === 'time-tracking') {
             this.populateTimesheetEmployeeSelect();
@@ -2296,6 +2356,8 @@ const AeroApp = {
                 this.showToast(`E-file failed: ${res.statusDetail || 'provider error'}`, 'danger');
             } else if (res.status === 'accepted') {
                 this.showToast(`${formType} accepted by ${agency} ✓`, 'success');
+            } else if (res.statusDetail && /Already filed/i.test(res.statusDetail)) {
+                this.showToast(res.statusDetail, 'success');
             } else {
                 this.showToast(`${formType} submitted — awaiting ${agency} acknowledgement.`, 'success');
                 if (res.submissionId) this.pollEfileStatus(res.submissionId, formRef);
@@ -2650,48 +2712,6 @@ const AeroApp = {
     },
 
     // --- Unified Portal Authentication Handlers ---
-    switchLoginTab: function(role) {
-        const tabCompany = document.getElementById('btnTabCompany');
-        const tabEmployee = document.getElementById('btnTabEmployee');
-        const formCompany = document.getElementById('formCompanyLogin');
-        const formEmployee = document.getElementById('formEmployeeLogin');
-
-        if (role === 'company') {
-            tabCompany.classList.add('active');
-            tabEmployee.classList.remove('active');
-            formCompany.classList.add('active');
-            formEmployee.classList.remove('active');
-        } else {
-            tabCompany.classList.remove('active');
-            tabEmployee.classList.add('active');
-            formCompany.classList.remove('active');
-            formEmployee.classList.add('active');
-        }
-    },
-
-    handleLogin: async function(e, role) {
-        e.preventDefault();
-        const emailId = role === 'company' ? 'companyEmailInput' : 'employeeEmailInput';
-        const passId  = role === 'company' ? 'companyPasswordInput' : 'employeePINInput';
-        const btnId   = role === 'company' ? 'btnCompanySignIn' : 'btnEmployeeSignIn';
-        const email   = document.getElementById(emailId)?.value?.trim();
-        const pass    = document.getElementById(passId)?.value;
-        const btn     = document.getElementById(btnId);
-        if (!email || !pass) { this.showToast('Please enter your email and password.', 'warning'); return; }
-        this._setButtonLoading(btn, true);
-        try {
-            await AeroDB.signIn(email, pass);
-        } catch (err) {
-            this.showToast(err.message || 'Invalid credentials.', 'danger');
-            this._setButtonLoading(btn, false);
-        }
-    },
-
-    logout: async function() {
-        await AeroDB.signOut();
-        this.showToast('Logged out successfully.', 'info');
-    },
-
     switchLoginTab: function(tab) {
         const tabs  = { company: 'btnTabCompany', employee: 'btnTabEmployee', register: 'btnTabRegister' };
         const forms = { company: 'formCompanyLogin', employee: 'formEmployeeLogin', register: 'formRegister' };
@@ -2714,6 +2734,36 @@ const AeroApp = {
             document.getElementById('regStep2')?.style.setProperty('display','none');
             document.getElementById('regSuccess')?.style.setProperty('display','none');
         }
+    },
+
+    handleLogin: async function(e, role) {
+        e.preventDefault();
+        const emailId = role === 'company' ? 'companyEmailInput' : 'employeeEmailInput';
+        const passId  = role === 'company' ? 'companyPasswordInput' : 'employeePINInput';
+        const btnId   = role === 'company' ? 'btnCompanySignIn' : 'btnEmployeeSignIn';
+        const email   = document.getElementById(emailId)?.value?.trim();
+        const pass    = document.getElementById(passId)?.value;
+        const btn     = document.getElementById(btnId);
+        if (!email || !pass) { this.showToast('Please enter your email and password.', 'warning'); return; }
+        this._setButtonLoading(btn, true);
+        try {
+            // Remember which tab was used — auth callback must not auto-route
+            // employee accounts into the portal when they used the Company tab
+            // (or vice versa).
+            sessionStorage.setItem('aeropay_login_role', role === 'employee' ? 'employee' : 'company');
+            await AeroDB.signIn(email, pass);
+            // Loading state clears when navigate away; reset if still on landing.
+            setTimeout(() => this._setButtonLoading(btn, false), 2500);
+        } catch (err) {
+            sessionStorage.removeItem('aeropay_login_role');
+            this.showToast(err.message || 'Invalid credentials.', 'danger');
+            this._setButtonLoading(btn, false);
+        }
+    },
+
+    logout: async function() {
+        await AeroDB.signOut();
+        this.showToast('Logged out successfully.', 'info');
     },
 
     regNextStep: function() {
@@ -3178,8 +3228,12 @@ const AeroApp = {
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body:    JSON.stringify({ action: 'setup_intent', employeeId }),
             });
-            if (!resp.ok) throw new Error('Failed to create setup intent');
-            const { client_secret } = await resp.json();
+            const setupPayload = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(setupPayload.error || 'Failed to create setup intent');
+            }
+            const { client_secret } = setupPayload;
+            if (!client_secret) throw new Error(setupPayload.error || 'Setup intent missing client_secret');
 
             // 2. Use Stripe.js to collect bank account via Financial Connections
             const stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
