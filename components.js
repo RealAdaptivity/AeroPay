@@ -422,9 +422,9 @@ function renderSetupWizardView(state, step) {
             <h2 class="setup-title">Tell us about your company</h2>
             <p class="setup-desc">This appears on paystubs, W-2s, and tax filings. You can update it anytime in Settings.</p>
             <form id="setupStep1Form" onsubmit="AeroApp.setupNext(event,1)" style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">
-                <div class="form-group" style="margin:0;"><label>Legal Company Name</label><input type="text" class="form-control" id="setupCompanyName" value="${companyName}" required placeholder="Acme Corp LLC"></div>
-                <div class="form-group" style="margin:0;"><label>Federal EIN <span style="color:var(--text-tertiary);font-weight:400;">(optional)</span></label><input type="text" class="form-control" id="setupEin" value="${ein}" placeholder="XX-XXXXXXX"></div>
-                <div class="form-group" style="margin:0;"><label>Primary State</label><select class="form-control" id="setupState">${allStates.map(s => `<option value="${s}">${s}</option>`).join('')}</select></div>
+                <div class="form-group" style="margin:0;"><label for="setupCompanyName">Legal Company Name</label><input type="text" class="form-control" id="setupCompanyName" value="${escapeAttr(companyName)}" required maxlength="200" placeholder="Acme Corp LLC"></div>
+                <div class="form-group" style="margin:0;"><label for="setupEin">Federal EIN <span style="color:var(--text-tertiary);font-weight:400;">(optional)</span></label><input type="text" class="form-control" id="setupEin" value="${escapeAttr(ein)}" maxlength="20" placeholder="XX-XXXXXXX"></div>
+                <div class="form-group" style="margin:0;"><label for="setupState">Primary State</label><select class="form-control" id="setupState">${allStates.map(s => `<option value="${escapeAttr(s)}">${escapeHTML(s)}</option>`).join('')}</select></div>
                 <button type="submit" class="btn btn-primary setup-next-btn">Save &amp; Continue →</button>
             </form>
         </div>`,
@@ -457,9 +457,9 @@ function renderSetupWizardView(state, step) {
             <h2 class="setup-title">Connect your bank account</h2>
             <p class="setup-desc">GlidePay debits this account to fund payroll ACH transfers. Details are encrypted end-to-end.</p>
             <form id="setupStep3Form" onsubmit="AeroApp.setupNext(event,3)" style="display:flex;flex-direction:column;gap:16px;margin-top:24px;">
-                <div class="form-group" style="margin:0;"><label>Bank Name</label><input type="text" class="form-control" id="setupBankName" value="${bank}" placeholder="Chase, Bank of America…" required></div>
-                <div class="form-group" style="margin:0;"><label>Routing Number</label><input type="text" class="form-control" id="setupRouting" value="${route}" placeholder="9-digit ABA number" maxlength="9" required></div>
-                <div class="form-group" style="margin:0;"><label>Account Number</label><input type="password" class="form-control" id="setupAccount" value="${acct}" placeholder="Checking account number" required></div>
+                <div class="form-group" style="margin:0;"><label for="setupBankName">Bank Name</label><input type="text" class="form-control" id="setupBankName" value="${escapeAttr(bank)}" maxlength="200" placeholder="Chase, Bank of America…" required></div>
+                <div class="form-group" style="margin:0;"><label for="setupRouting">Routing Number</label><input type="text" class="form-control" id="setupRouting" value="${escapeAttr(route)}" placeholder="9-digit ABA number" maxlength="9" inputmode="numeric" pattern="[0-9]{9}" required></div>
+                <div class="form-group" style="margin:0;"><label for="setupAccount">Account Number</label><input type="password" class="form-control" id="setupAccount" value="${escapeAttr(acct)}" placeholder="Checking account number" minlength="4" maxlength="17" inputmode="numeric" pattern="[0-9]{4,17}" autocomplete="off" required></div>
                 <div class="form-group" style="margin:0;"><label>Default Pay Frequency</label>
                     <select class="form-control" id="setupFrequency">
                         <option value="weekly" ${freq==='weekly'?'selected':''}>Weekly (52×/yr)</option>
@@ -698,14 +698,14 @@ function renderDashboardView(state) {
                             const st = statusMap[run.status] || { badge: 'success', label: 'Deposited' };
                             return `
                             <tr>
-                                <td style="font-weight:600;">${run.date}</td>
+                                <td style="font-weight:600;">${escapeHTML(run.date)}</td>
                                 <td>${run.employeeCount} employees</td>
                                 <td>${formatCurrency(run.grossPayroll)}</td>
                                 <td>${formatCurrency(run.employerTaxes)}</td>
                                 <td style="font-weight:700;color:var(--primary);">${formatCurrency(run.totalCost)}</td>
                                 <td><span class="badge badge-${st.badge}">${st.label}</span></td>
                                 <td>
-                                    <button class="btn btn-sm-icon" onclick="AeroApp.showPayrollHistoryDetails('${run.id}')" title="View Details">
+                                    <button class="btn btn-sm-icon" onclick="AeroApp.showPayrollHistoryDetails('${escapeAttr(run.id)}')" title="View Details">
                                         <svg style="width:16px;height:16px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                     </button>
                                 </td>
@@ -766,14 +766,14 @@ function renderEmployeesView(state) {
                                     <div class="employee-row-info">
                                         <div class="avatar" style="${is1099 ? 'background: var(--purple-light); color: var(--purple)' : ''}">${emp.name.split(' ').map(n=>n[0]).join('')}</div>
                                         <div>
-                                            <div style="font-weight:600;">${emp.name}</div>
-                                            <div style="font-size:12px; color:var(--text-tertiary);">${emp.email}</div>
+                                            <div style="font-weight:600;">${escapeHTML(emp.name)}</div>
+                                            <div style="font-size:12px; color:var(--text-tertiary);">${escapeHTML(emp.email)}</div>
                                         </div>
                                     </div>
                                 </td>
                                 <td>
-                                    <div>${emp.role}</div>
-                                    <div style="font-size:11px; font-weight:700; color:var(--text-secondary);">${emp.department || 'General'} | <span class="badge badge-info" style="padding: 1px 4px; font-size:10px;">${emp.state}</span></div>
+                                    <div>${escapeHTML(emp.role)}</div>
+                                    <div style="font-size:11px; font-weight:700; color:var(--text-secondary);">${escapeHTML(emp.department || 'General')} | <span class="badge badge-info" style="padding: 1px 4px; font-size:10px;">${escapeHTML(emp.state)}</span></div>
                                 </td>
                                 <td>
                                     <span class="badge ${is1099 ? 'badge-warning' : 'badge-success'}">${is1099 ? '1099 Contractor' : 'W-2 Employee'}</span>
@@ -2233,7 +2233,7 @@ function getW2SignaturePadHTML(employee) {
                     Electronic Signature Legal Disclosure
                 </div>
                 <p style="font-size:12px; color:var(--text-secondary); line-height:1.6; margin:0;">
-                    By signing below, <strong>${employee.name}</strong> certifies that the information on IRS Form W-2 is accurate and consents to use of an electronic signature in lieu of a wet-ink signature. This signature is legally binding under the ESIGN Act (15 U.S.C. § 7001).
+                    By signing below, <strong>${escapeHTML(employee.name)}</strong> certifies that the information on IRS Form W-2 is accurate and consents to use of an electronic signature in lieu of a wet-ink signature. This signature is legally binding under the ESIGN Act (15 U.S.C. § 7001).
                 </p>
             </div>
 
@@ -2241,7 +2241,7 @@ function getW2SignaturePadHTML(employee) {
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; font-size:13px;">
                 <div style="background:var(--bg-tertiary); border-radius:var(--radius-sm); padding:10px 14px;">
                     <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-tertiary); margin-bottom:2px;">Employee</div>
-                    <div style="font-weight:700;">${employee.name}</div>
+                    <div style="font-weight:700;">${escapeHTML(employee.name)}</div>
                 </div>
                 <div style="background:var(--bg-tertiary); border-radius:var(--radius-sm); padding:10px 14px;">
                     <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-tertiary); margin-bottom:2px;">Tax Year</div>
@@ -3069,9 +3069,9 @@ function renderEmployeeDashboardView(state, employeeId) {
             <div class="employee-profile-summary">
                 <div class="employee-avatar-large">${employee.name.split(' ').map(n=>n[0]).join('')}</div>
                 <div class="employee-meta-info">
-                    <h2 class="employee-name-title">Welcome back, ${employee.name}!</h2>
+                    <h2 class="employee-name-title">Welcome back, ${escapeHTML(employee.name)}!</h2>
                     <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
-                        <span class="employee-role-badge">${employee.role}</span>
+                        <span class="employee-role-badge">${escapeHTML(employee.role)}</span>
                         <span style="font-size:13px; opacity:0.8;">Tax Residence: ${employee.state} | filing: W-4 ${employee.filingStatus}</span>
                     </div>
                 </div>
@@ -3192,11 +3192,11 @@ function renderEmployeeDashboardView(state, employeeId) {
                             </div>
                             <div class="form-group">
                                 <label for="splitSavingsRouting" style="font-size:12px; font-weight:600; color:var(--text-secondary);">Savings Routing Number</label>
-                                <input type="text" class="form-control" id="splitSavingsRouting" value="${employee.splitDeposits ? (employee.splitDeposits.savingsRouting || '') : ''}" placeholder="9-digit Routing Number" style="padding:8px 12px; background:var(--bg-secondary);">
+                                <input type="text" class="form-control" id="splitSavingsRouting" value="${escapeAttr(employee.splitDeposits ? (employee.splitDeposits.savingsRouting || '') : '')}" maxlength="9" inputmode="numeric" placeholder="9-digit Routing Number" style="padding:8px 12px; background:var(--bg-secondary);">
                             </div>
                             <div class="form-group">
                                 <label for="splitSavingsAccount" style="font-size:12px; font-weight:600; color:var(--text-secondary);">Savings Account Number</label>
-                                <input type="text" class="form-control" id="splitSavingsAccount" value="${employee.splitDeposits ? (employee.splitDeposits.savingsAccount || '') : ''}" placeholder="Account Number" style="padding:8px 12px; background:var(--bg-secondary);">
+                                <input type="text" class="form-control" id="splitSavingsAccount" value="${escapeAttr(employee.splitDeposits ? (employee.splitDeposits.savingsAccount || '') : '')}" maxlength="17" inputmode="numeric" placeholder="Account Number" style="padding:8px 12px; background:var(--bg-secondary);">
                             </div>
                         </div>
 
@@ -3356,7 +3356,7 @@ function renderEmployeeDocumentsView(state, employeeId) {
                             <div style="font-weight:700; font-size:15px; color:var(--text-primary);">Form W-9 Request for Taxpayer ID</div>
                             <div style="font-size:12px; color:var(--text-tertiary); margin-top:2px;">TIN Verification: XXX-XX-8822. Signed and verified.</div>
                         </div>
-                        <button class="btn btn-outline" onclick="AeroApp.showOnboardingDoc('W-9', '${employee.name}', 'Single')" style="padding:8px 16px; font-size:13px;">
+                        <button class="btn btn-outline" onclick="AeroApp.showEmployeeOnboardingDoc('W-9', '${employee.id}')" style="padding:8px 16px; font-size:13px;">
                             Review W-9
                         </button>
                     </div>
@@ -3419,7 +3419,7 @@ function renderEmployeeDocumentsView(state, employeeId) {
                         <div style="font-weight:700; font-size:15px; color:var(--text-primary);">Form W-4 Withholding Allowance</div>
                         <div style="font-size:12px; color:var(--text-tertiary); margin-top:2px;">Filing Status: ${employee.filingStatus === 'married' ? 'Married Filing Jointly' : 'Single'}</div>
                     </div>
-                    <button class="btn btn-outline" onclick="AeroApp.showOnboardingDoc('W-4', '${employee.name}', '${employee.filingStatus}')" style="padding:8px 16px; font-size:13px;">
+                    <button class="btn btn-outline" onclick="AeroApp.showEmployeeOnboardingDoc('W-4', '${employee.id}')" style="padding:8px 16px; font-size:13px;">
                         Review Details
                     </button>
                 </div>
@@ -3535,10 +3535,10 @@ function renderContractorDashboardView(state, employeeId) {
             <div class="employee-profile-summary">
                 <div class="employee-avatar-large" style="background: var(--warning-light); color: var(--warning);">${employee.name.split(' ').map(n=>n[0]).join('')}</div>
                 <div class="employee-meta-info">
-                    <h2 class="employee-name-title">Welcome back, ${employee.name}!</h2>
+                    <h2 class="employee-name-title">Welcome back, ${escapeHTML(employee.name)}!</h2>
                     <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
-                        <span class="employee-role-badge" style="background: var(--warning-light); color: var(--warning);">${employee.role}</span>
-                        <span style="font-size:13px; opacity:0.8;">Tax Status: 1099 Contractor | Department: ${employee.department}</span>
+                        <span class="employee-role-badge" style="background: var(--warning-light); color: var(--warning);">${escapeHTML(employee.role)}</span>
+                        <span style="font-size:13px; opacity:0.8;">Tax Status: 1099 Contractor | Department: ${escapeHTML(employee.department)}</span>
                     </div>
                 </div>
             </div>
@@ -3635,11 +3635,11 @@ function renderContractorDashboardView(state, employeeId) {
                             </div>
                             <div class="form-group">
                                 <label for="splitSavingsRouting" style="font-size:12px; font-weight:600; color:var(--text-secondary);">Savings Routing Number</label>
-                                <input type="text" class="form-control" id="splitSavingsRouting" value="${employee.splitDeposits ? (employee.splitDeposits.savingsRouting || '') : ''}" placeholder="9-digit Routing Number" style="padding:8px 12px; background:var(--bg-secondary);">
+                                <input type="text" class="form-control" id="splitSavingsRouting" value="${escapeAttr(employee.splitDeposits ? (employee.splitDeposits.savingsRouting || '') : '')}" maxlength="9" inputmode="numeric" placeholder="9-digit Routing Number" style="padding:8px 12px; background:var(--bg-secondary);">
                             </div>
                             <div class="form-group">
                                 <label for="splitSavingsAccount" style="font-size:12px; font-weight:600; color:var(--text-secondary);">Savings Account Number</label>
-                                <input type="text" class="form-control" id="splitSavingsAccount" value="${employee.splitDeposits ? (employee.splitDeposits.savingsAccount || '') : ''}" placeholder="Account Number" style="padding:8px 12px; background:var(--bg-secondary);">
+                                <input type="text" class="form-control" id="splitSavingsAccount" value="${escapeAttr(employee.splitDeposits ? (employee.splitDeposits.savingsAccount || '') : '')}" maxlength="17" inputmode="numeric" placeholder="Account Number" style="padding:8px 12px; background:var(--bg-secondary);">
                             </div>
                         </div>
 
@@ -3805,7 +3805,7 @@ function get1099NECHTML(employee, state) {
                     </div>
                     <div style="padding:6px;">
                         <span style="font-weight:700; color:#c2410c; font-size:9px; display:block;">RECIPIENT'S name, address, and ZIP code</span>
-                        <span style="font-weight:600;">${employee.name}<br/>${employee.email}</span>
+                        <span style="font-weight:600;">${escapeHTML(employee.name)}<br/>${escapeHTML(employee.email)}</span>
                     </div>
                 </div>
                 
@@ -3946,13 +3946,13 @@ function renderDirectoryView(state) {
         return `
             <div class="dir-card card">
                 <div class="dir-avatar" style="background:var(--${color}-light);color:var(--${color === 'accent-purple' ? 'accent-purple' : color});">${initials}</div>
-                <div style="font-size:17px;font-weight:800;margin-top:10px;">${emp.name}</div>
-                <div style="font-size:13px;color:var(--text-secondary);margin-top:2px;">${emp.role}</div>
-                <div class="badge badge-${color}" style="margin-top:8px;font-size:11px;">${emp.department}</div>
+                <div style="font-size:17px;font-weight:800;margin-top:10px;">${escapeHTML(emp.name)}</div>
+                <div style="font-size:13px;color:var(--text-secondary);margin-top:2px;">${escapeHTML(emp.role)}</div>
+                <div class="badge badge-${color}" style="margin-top:8px;font-size:11px;">${escapeHTML(emp.department)}</div>
                 <div style="width:100%;margin-top:12px;border-top:1px solid var(--border-color);padding-top:12px;display:flex;flex-direction:column;gap:4px;">
                     <div style="font-size:12px;color:var(--text-tertiary);display:flex;gap:6px;align-items:center;">
                         <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                        ${emp.email}
+                        ${escapeHTML(emp.email)}
                     </div>
                     <div style="font-size:12px;color:var(--text-tertiary);display:flex;gap:6px;align-items:center;">
                         <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -4010,7 +4010,7 @@ function renderPTOView(state) {
                 <td><span class="badge badge-${typeColor}" style="text-transform:capitalize;">${req.type}</span></td>
                 <td style="font-weight:600;">${req.startDate} → ${req.endDate}</td>
                 <td>${req.hours} hrs</td>
-                <td style="max-width:180px;font-size:13px;color:var(--text-secondary);">${req.reason}</td>
+                <td style="max-width:180px;font-size:13px;color:var(--text-secondary);">${escapeHTML(req.reason)}</td>
                 <td><span class="badge badge-${statusColor}" style="text-transform:capitalize;">${req.status}</span></td>
                 <td style="text-align:right;">
                     ${req.status === 'pending' ? `
@@ -4150,9 +4150,9 @@ function renderApprovalsView(state) {
                 <td>${run ? run.date : '—'}</td>
                 <td>${appr.employeeCount} employees</td>
                 <td style="font-weight:700;">${formatCurrency(appr.totalAmount)}</td>
-                <td>${appr.submittedBy}</td>
-                <td>${appr.submittedTs}</td>
-                <td><span class="badge badge-${statusColor}" style="text-transform:capitalize;">${appr.status}</span></td>
+                <td>${escapeHTML(appr.submittedBy)}</td>
+                <td>${escapeHTML(appr.submittedTs)}</td>
+                <td><span class="badge badge-${statusColor}" style="text-transform:capitalize;">${escapeHTML(appr.status)}</span></td>
                 <td style="text-align:right;">
                     ${appr.status === 'pending' ? `
                         <div style="display:flex;gap:6px;justify-content:flex-end;">
@@ -4193,15 +4193,15 @@ function renderApprovalsView(state) {
                     <tr>
                         <td style="padding: 12px 24px;">
                             <div class="employee-row-info">
-                                <div class="avatar">${emp ? emp.name.split(' ').map(n=>n[0]).join('') : 'U'}</div>
+                                <div class="avatar">${escapeHTML(emp ? emp.name.split(' ').map(n=>n[0]).join('') : 'U')}</div>
                                 <div>
-                                    <div style="font-weight:600;">${emp ? emp.name : 'Unknown'}</div>
-                                    <div style="font-size:12px; color:var(--text-tertiary);">${emp ? emp.email : ''}</div>
+                                    <div style="font-weight:600;">${escapeHTML(emp ? emp.name : 'Unknown')}</div>
+                                    <div style="font-size:12px; color:var(--text-tertiary);">${escapeHTML(emp ? emp.email : '')}</div>
                                 </div>
                             </div>
                         </td>
                         <td>W-2 Employee</td>
-                        <td>${adv.requestDate}</td>
+                        <td>${escapeHTML(adv.requestDate)}</td>
                         <td style="font-weight:700; color:var(--primary);">${formatCurrency(adv.amount)}</td>
                         <td><span class="badge badge-warning">Pending Review</span></td>
                         <td style="text-align:right; padding-right:24px;">
@@ -4273,7 +4273,7 @@ function renderReportsView(state) {
                     <label>Department Filter</label>
                     <select class="form-control" id="reportDeptFilter" onchange="AeroApp.generateReport()">
                         <option value="">All Departments</option>
-                        ${[...new Set(state.employees.map(e=>e.department))].map(d=>`<option value="${d}">${d}</option>`).join('')}
+                        ${[...new Set(state.employees.map(e=>e.department))].map(d=>`<option value="${escapeAttr(d)}">${escapeHTML(d)}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -4323,9 +4323,9 @@ function renderAnnouncementsView(state) {
                             <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${icon}</svg>
                         </div>
                         <div>
-                            <div style="font-weight:700;font-size:15px;">${ann.title}</div>
-                            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">${ann.body}</div>
-                            <div style="font-size:11px;color:var(--text-tertiary);margin-top:8px;">Posted by ${ann.author} · ${ann.date}</div>
+                            <div style="font-weight:700;font-size:15px;">${escapeHTML(ann.title)}</div>
+                            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;line-height:1.6;">${escapeHTML(ann.body)}</div>
+                            <div style="font-size:11px;color:var(--text-tertiary);margin-top:8px;">Posted by ${escapeHTML(ann.author)} · ${escapeHTML(ann.date)}</div>
                         </div>
                     </div>
                     <button onclick="AeroApp.deleteAnnouncement('${ann.id}')" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;padding:4px;border-radius:4px;flex-shrink:0;" title="Delete">
@@ -4381,13 +4381,13 @@ function renderAuditLogView(state) {
                 <div class="audit-body card">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                         <div>
-                            <div style="font-weight:700;font-size:14px;">${entry.action}</div>
-                            <div style="font-size:13px;color:var(--text-secondary);margin-top:2px;">${entry.details}</div>
+                            <div style="font-weight:700;font-size:14px;">${escapeHTML(entry.action)}</div>
+                            <div style="font-size:13px;color:var(--text-secondary);margin-top:2px;">${escapeHTML(entry.details)}</div>
                         </div>
                         <div style="text-align:right;flex-shrink:0;margin-left:16px;">
                             <span class="badge badge-${color}" style="font-size:10px;text-transform:capitalize;">${entry.category}</span>
-                            <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">${entry.ts}</div>
-                            <div style="font-size:11px;color:var(--text-tertiary);">${entry.actor}</div>
+                            <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">${escapeHTML(entry.ts)}</div>
+                            <div style="font-size:11px;color:var(--text-tertiary);">${escapeHTML(entry.actor)}</div>
                         </div>
                     </div>
                 </div>
@@ -4428,7 +4428,7 @@ function renderEmployeePTOView(state, employeeId) {
             <td><span class="badge badge-primary" style="text-transform:capitalize;">${req.type}</span></td>
             <td>${req.startDate} → ${req.endDate}</td>
             <td>${req.hours} hrs</td>
-            <td>${req.reason}</td>
+            <td>${escapeHTML(req.reason)}</td>
             <td><span class="badge badge-${statusColors[req.status]||'primary'}" style="text-transform:capitalize;">${req.status}</span></td>
         </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-tertiary);">No requests submitted yet</td></tr>';
 

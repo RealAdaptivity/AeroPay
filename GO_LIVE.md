@@ -2,6 +2,11 @@
 
 Domain **glidepay.org** is live on GitHub Pages. This checklist wires the fresh Stripe account and Supabase edge functions.
 
+> **Do not point the current Edge deployment at live Stripe.** It is explicitly
+> sandbox-locked to `http://localhost:5500` and `sk_test_`/`rk_test_` keys.
+> Public cutover requires replacing those guards with the production origin
+> and live-key validation, redeploying, and rerunning the production preflight.
+
 ---
 
 ## Status snapshot
@@ -77,6 +82,8 @@ npx supabase link --project-ref ojvnxnlrghatkwjrlnop
 
 export STRIPE_SECRET_KEY=sk_test_…
 export STRIPE_WEBHOOK_SECRET=whsec_…
+export STRIPE_PRICE_BASE_ID=price_1TzIdaAsgAzfeB6DKeordaY7
+export STRIPE_PRICE_SEAT_ID=price_1TzIdbAsgAzfeB6D0GyWkgXK
 bash scripts/set-supabase-secrets.sh sandbox
 ```
 
@@ -90,6 +97,7 @@ npx supabase functions deploy stripe-checkout
 npx supabase functions deploy stripe-portal
 npx supabase functions deploy stripe-webhook --no-verify-jwt
 npx supabase functions deploy file-tax
+npx supabase functions deploy invite-employee
 ```
 
 ### 4. End-to-end test
@@ -97,8 +105,7 @@ npx supabase functions deploy file-tax
 Follow [SANDBOX_TESTING.md](./SANDBOX_TESTING.md):
 
 ```
-http://localhost:5500          # auto-sandbox
-https://glidepay.org/?sandbox=1
+http://localhost:5500          # sandbox host
 ```
 
 Checklist: Connect onboarding → Active FA → employee bank link → 3-day hold → OutboundTransfer → webhook `posted`.
@@ -131,6 +138,8 @@ Paste printed `price_…` IDs and `pk_live_…` into `config.js` → `LIVE`.
 ```bash
 export STRIPE_SECRET_KEY=sk_live_…   # or rk_live_…
 export STRIPE_WEBHOOK_SECRET=whsec_… # from the *live* webhook endpoint
+export STRIPE_PRICE_BASE_ID=price_…   # live base price
+export STRIPE_PRICE_SEAT_ID=price_…   # live seat price
 export PLATFORM_URL=https://glidepay.org
 bash scripts/set-supabase-secrets.sh live
 ```
@@ -164,5 +173,5 @@ Merge this PR so GitHub Pages serves GlidePay branding + sandbox keys + live pla
 |---|---|
 | Provision products/webhook | `bash scripts/setup-stripe.sh sandbox\|live` |
 | Push Supabase secrets | `bash scripts/set-supabase-secrets.sh sandbox\|live` |
-| Force sandbox in browser | `?sandbox=1` or `localStorage.setItem('aeropay_env','sandbox')` |
-| Force live locally | `localStorage.setItem('aeropay_env','live')` |
+| Run sandbox frontend | Serve locally at `http://localhost:5500` |
+| Verify sandbox endpoints | `npm run verify:sandbox` |

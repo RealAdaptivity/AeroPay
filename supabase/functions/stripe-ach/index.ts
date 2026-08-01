@@ -16,9 +16,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject, RequestError, requireUuid } from "../_shared/security.ts";
 
-const stripe   = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { apiVersion: "2024-06-20" });
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+const stripe   = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -26,17 +28,23 @@ const supabase = createClient(
 
 const RESEND_API_KEY  = Deno.env.get("RESEND_API_KEY") ?? "";
 const PLATFORM_FROM   = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@glidepay.org";
-const PLATFORM_URL    = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
+const PLATFORM_URL    = "http://localhost:5500";
 
-const HOLD_MS = 3 * 24 * 60 * 60 * 1000;
+const HOLD_BUSINESS_DAYS = 3;
 
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  "http://localhost:5500",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return ok();
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    if (!/^(sk|rk)_test_/.test(STRIPE_SECRET_KEY)) {
+        return json({ error: "Sandbox deployment requires a Stripe test key" }, 503);
+    }
 
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!jwt) return json({ error: "Unauthorized" }, 401);
@@ -44,7 +52,18 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const body   = await req.json();
+    let body: any;
+    try {
+        body = await readJsonObject(req, 16_384);
+        const requestedAction = String(body.action || "");
+        if (!["setup_intent","confirm_setup","disburse","release_held"].includes(requestedAction)) throw new RequestError("Unknown action", 400);
+        await enforceUserRateLimit(supabase, user.id, `stripe-ach:${requestedAction}`, 20);
+        if (body.employeeId !== undefined) body.employeeId = requireUuid(body.employeeId, "employeeId");
+        if (body.payrollRunId !== undefined) body.payrollRunId = requireUuid(body.payrollRunId, "payrollRunId");
+        if (body.paymentMethodId !== undefined && !/^pm_[A-Za-z0-9]{8,100}$/.test(String(body.paymentMethodId))) {
+            throw new RequestError("Invalid paymentMethodId", 400);
+        }
+    } catch (err) { return errorResponse(err, CORS, "stripe-ach"); }
     const action = body.action as string;
 
     try {
@@ -52,11 +71,11 @@ serve(async (req: Request) => {
             case "setup_intent":  return await handleSetupIntent(user.id, body);
             case "confirm_setup": return await handleConfirmSetup(user.id, body);
             case "disburse":      return await handleDisburse(user.id, body);
+            case "release_held":  return await handleReleaseHeld(user.id);
             default:              return json({ error: `Unknown action: ${action}` }, 400);
         }
     } catch (err) {
-        console.error(`[stripe-ach] ${action}:`, err);
-        return json({ error: (err as Error).message }, 500);
+        return errorResponse(err, CORS, `stripe-ach:${action}`);
     }
 });
 
@@ -221,55 +240,132 @@ async function handleConfirmSetup(userId: string, body: {
 // ── Disburse ──────────────────────────────────────────────────────────────────
 async function handleDisburse(userId: string, body: {
     payrollRunId:   string;
-    disbursements?: Array<{ employeeId: string; netPayCents: number }>;
 }) {
-    const company            = await getCompany(userId);
-    const financialAccountId = company.stripe_financial_account_id as string | undefined;
-    const connectedAccountId = company.stripe_account_id as string | undefined;
-    const now                = Date.now();
-
     if (!body.payrollRunId) {
         return json({ error: "payrollRunId is required" }, 400);
     }
 
-    let disbursements = Array.isArray(body.disbursements) ? body.disbursements : [];
-    if (!disbursements.length) {
-        const { data: lines, error: lineErr } = await supabase
-            .from("payroll_line_items")
-            .select("employee_id, net_pay")
-            .eq("payroll_run_id", body.payrollRunId)
-            .eq("company_id", company.id);
-        if (lineErr) throw new Error(lineErr.message);
-        disbursements = (lines || []).map((li) => ({
-            employeeId:  li.employee_id as string,
-            netPayCents: Math.round(Number(li.net_pay || 0) * 100),
-        }));
+    const { data: run, error: runError } = await supabase
+        .from("payroll_runs")
+        .select("id, company_id, status")
+        .eq("id", body.payrollRunId)
+        .single();
+    if (runError || !run) return json({ error: "Payroll run not found" }, 404);
+    if (run.status !== "completed") {
+        return json({ error: "Payroll must be approved before disbursement" }, 409);
     }
+
+    const { data: membership } = await supabase
+        .from("company_users")
+        .select("role")
+        .eq("company_id", run.company_id)
+        .eq("user_id", userId)
+        .in("role", ["owner", "admin"])
+        .maybeSingle();
+    if (!membership) return json({ error: "Owner or admin access required" }, 403);
+
+    const { data: company, error: companyError } = await supabase
+        .from("companies")
+        .select("id, stripe_financial_account_id, stripe_account_id")
+        .eq("id", run.company_id)
+        .single();
+    if (companyError || !company) return json({ error: "Company not found" }, 404);
+
+    const financialAccountId = company.stripe_financial_account_id as string | undefined;
+    const connectedAccountId = company.stripe_account_id as string | undefined;
+    const now = Date.now();
+
+    const { data: lines, error: lineErr } = await supabase
+        .from("payroll_line_items")
+        .select("employee_id, net_pay")
+        .eq("payroll_run_id", body.payrollRunId)
+        .eq("company_id", company.id);
+    if (lineErr) throw new Error(lineErr.message);
+
+    const disbursements = (lines || []).map((line) => ({
+        employeeId: line.employee_id as string,
+        netPayCents: Math.round(Number(line.net_pay || 0) * 100),
+    }));
 
     const results: Array<{ employeeId: string; status: string; transferId?: string; heldUntil?: string; error?: string }> = [];
 
     for (const d of disbursements) {
         if (d.netPayCents <= 0) continue;
+        const operationKey = `payroll:${body.payrollRunId}:employee:${d.employeeId}`;
 
         const { data: emp } = await supabase
             .from("employees")
             .select("stripe_pm_id, stripe_customer_id, bank_account_last4, name, email, bank_account_linked_at")
             .eq("id", d.employeeId)
+            .eq("company_id", company.id)
             .single();
 
-        const linkedAt     = emp?.bank_account_linked_at ? new Date(emp.bank_account_linked_at).getTime() : null;
-        const inHoldWindow = linkedAt !== null && (now - linkedAt) < HOLD_MS;
-        const heldUntil    = inHoldWindow ? new Date(linkedAt! + HOLD_MS).toISOString() : undefined;
+        if (!emp) {
+            results.push({ employeeId: d.employeeId, status: "failed", error: "Employee not found" });
+            continue;
+        }
+
+        const { data: existing } = await supabase
+            .from("ach_transfers")
+            .select("id, status, stripe_transfer_id, failure_message")
+            .eq("operation_key", operationKey)
+            .maybeSingle();
+
+        if (existing && ["processing", "succeeded"].includes(existing.status)) {
+            results.push({
+                employeeId: d.employeeId,
+                status: existing.status,
+                transferId: existing.stripe_transfer_id || undefined,
+                error: existing.failure_message || undefined,
+            });
+            continue;
+        }
+
+        let transferRowId = existing?.id as string | undefined;
+        if (!transferRowId) {
+            const { data: reserved, error: reserveError } = await supabase
+                .from("ach_transfers")
+                .insert({
+                    company_id: company.id,
+                    payroll_run_id: body.payrollRunId,
+                    employee_id: d.employeeId,
+                    operation_key: operationKey,
+                    amount_cents: d.netPayCents,
+                    status: "pending",
+                })
+                .select("id")
+                .single();
+
+            if (reserveError) {
+                const { data: concurrent } = await supabase
+                    .from("ach_transfers")
+                    .select("id, status, stripe_transfer_id, failure_message")
+                    .eq("operation_key", operationKey)
+                    .single();
+                if (!concurrent) throw new Error(reserveError.message);
+                results.push({
+                    employeeId: d.employeeId,
+                    status: concurrent.status,
+                    transferId: concurrent.stripe_transfer_id || undefined,
+                    error: concurrent.failure_message || undefined,
+                });
+                continue;
+            }
+            transferRowId = reserved.id as string;
+        }
+
+        const linkedAt = emp?.bank_account_linked_at ? new Date(emp.bank_account_linked_at) : null;
+        const holdUntil = linkedAt ? addBusinessDays(linkedAt, HOLD_BUSINESS_DAYS) : null;
+        const inHoldWindow = holdUntil !== null && now < holdUntil.getTime();
+        const heldUntil = inHoldWindow ? holdUntil!.toISOString() : undefined;
 
         if (inHoldWindow) {
-            await supabase.from("ach_transfers").insert({
-                company_id:     company.id,
-                payroll_run_id: body.payrollRunId,
-                employee_id:    d.employeeId,
-                amount_cents:   d.netPayCents,
+            const { error: holdError } = await supabase.from("ach_transfers").update({
                 status:         "held",
-                failure_message: `New bank account ••••${emp?.bank_account_last4} is within the 3-day security hold. Funds will be released on ${new Date(linkedAt! + HOLD_MS).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
-            });
+                failure_message: `New bank account ••••${emp?.bank_account_last4} is within the 3-business-day security hold. Funds will be released on ${holdUntil!.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+                updated_at:     new Date().toISOString(),
+            }).eq("id", transferRowId);
+            if (holdError) throw new Error(holdError.message);
             results.push({ employeeId: d.employeeId, status: "held", heldUntil });
             continue;
         }
@@ -295,7 +391,10 @@ async function handleDisburse(userId: string, body: {
                             payroll_run_id: body.payrollRunId,
                         },
                     },
-                    { stripeAccount: connectedAccountId },
+                    {
+                        stripeAccount: connectedAccountId,
+                        idempotencyKey: operationKey,
+                    },
                 );
                 stripeTransferId = payment.id;
             } catch (err) {
@@ -312,17 +411,15 @@ async function handleDisburse(userId: string, body: {
                 : "Company financial account not ready";
         }
 
-        const { error: insertErr } = await supabase.from("ach_transfers").insert({
-            company_id:         company.id,
-            payroll_run_id:     body.payrollRunId,
-            employee_id:        d.employeeId,
+        const { error: insertErr } = await supabase.from("ach_transfers").update({
             stripe_transfer_id: stripeTransferId ?? null,
             amount_cents:       d.netPayCents,
             status,
             failure_message:    failureMessage,
-        });
+            updated_at:         new Date().toISOString(),
+        }).eq("id", transferRowId);
 
-        if (insertErr) console.error("[stripe-ach] insert ach_transfers:", insertErr.message);
+        if (insertErr) throw new Error(`Update ach_transfers: ${insertErr.message}`);
 
         results.push({
             employeeId: d.employeeId,
@@ -335,7 +432,46 @@ async function handleDisburse(userId: string, body: {
     return json({ results });
 }
 
+async function handleReleaseHeld(userId: string) {
+    const { data: memberships, error: membershipError } = await supabase
+        .from("company_users")
+        .select("company_id")
+        .eq("user_id", userId)
+        .in("role", ["owner", "admin"]);
+    if (membershipError) throw new Error(membershipError.message);
+    if (!memberships?.length) return json({ results: [] });
+
+    const companyIds = memberships.map((membership) => membership.company_id);
+    const { data: held, error: heldError } = await supabase
+        .from("ach_transfers")
+        .select("payroll_run_id")
+        .in("company_id", companyIds)
+        .eq("status", "held")
+        .not("payroll_run_id", "is", null);
+    if (heldError) throw new Error(heldError.message);
+
+    const runIds = [...new Set((held || []).map((row) => row.payroll_run_id as string))];
+    const released = [];
+    for (const payrollRunId of runIds) {
+        const response = await handleDisburse(userId, { payrollRunId });
+        const payload = await response.json();
+        released.push({ payrollRunId, ...payload });
+    }
+    return json({ results: released });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function addBusinessDays(start: Date, days: number): Date {
+    const result = new Date(start);
+    let remaining = days;
+    while (remaining > 0) {
+        result.setUTCDate(result.getUTCDate() + 1);
+        const day = result.getUTCDay();
+        if (day !== 0 && day !== 6) remaining -= 1;
+    }
+    return result;
+}
 
 async function ensureEmployeeCustomer(
     emp: { id: string; name?: string | null; email?: string | null; stripe_customer_id?: string | null },
@@ -360,7 +496,10 @@ async function ensureEmployeeCustomer(
             email: emp.email || undefined,
             metadata: { employee_id: emp.id },
         },
-        { stripeAccount: connectedAccountId },
+        {
+            stripeAccount: connectedAccountId,
+            idempotencyKey: `employee-customer:${emp.id}`,
+        },
     );
 
     await supabase.from("employees").update({
@@ -441,7 +580,7 @@ async function getCompany(userId: string, opts: { employeeId?: string } = {}) {
         id:          chosen.company_id,
         admin_email: adminEmail,
         _membershipRole: (chosen.role as string) || "member",
-        ...(chosen.companies as Record<string, unknown>),
+        ...(chosen.companies as unknown as Record<string, unknown>),
     };
 }
 

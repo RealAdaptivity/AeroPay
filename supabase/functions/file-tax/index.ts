@@ -21,7 +21,8 @@
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject, RequestError, requireUuid } from "../_shared/security.ts";
 
 const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -46,8 +47,10 @@ const providerName = EFILE_PROVIDER
     || (useTaxBandit ? "TaxBandit" : "E-File Provider");
 
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  "http://localhost:5500",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
 let cachedAccessToken: { token: string; exp: number } | null = null;
@@ -66,6 +69,7 @@ function normalizeStatus(raw: string | undefined): string {
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!jwt) return json({ error: "Unauthorized" }, 401);
@@ -81,7 +85,14 @@ serve(async (req: Request) => {
         }, 200);
     }
 
-    const body   = await req.json().catch(() => ({}));
+    let body: any;
+    try {
+        body = await readJsonObject(req, 262_144);
+        const requestedAction = String(body.action || "");
+        if (!["submit","get_status","list","probe"].includes(requestedAction)) throw new RequestError("Unknown action", 400);
+        await enforceUserRateLimit(supabase, user.id, `file-tax:${requestedAction}`, 10);
+        if (body.submissionId !== undefined) body.submissionId = requireUuid(body.submissionId, "submissionId");
+    } catch (err) { return errorResponse(err, CORS, "file-tax"); }
     const action = body.action as string;
 
     try {
@@ -93,8 +104,7 @@ serve(async (req: Request) => {
             default:           return json({ error: `Unknown action: ${action}` }, 400);
         }
     } catch (err) {
-        console.error(`[file-tax] ${action}:`, err);
-        return json({ error: (err as Error).message }, 500);
+        return errorResponse(err, CORS, `file-tax:${action}`);
     }
 });
 
@@ -108,16 +118,25 @@ async function handleSubmit(userId: string, body: {
     if (!body.formRef || !body.formType) {
         return json({ error: "formRef and formType are required" }, 400);
     }
+    const formRef = String(body.formRef).trim();
+    const formType = String(body.formType).trim();
+    const period = String(body.period ?? "").trim();
+    const agency = String(body.agency ?? "").trim();
+    const amount = Number(body.amount ?? 0);
+    if (!/^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,99}$/.test(formRef)) throw new RequestError("Invalid formRef", 400);
+    if (formType.length < 1 || formType.length > 100) throw new RequestError("Invalid formType", 400);
+    if (period.length > 50 || agency.length > 100) throw new RequestError("Invalid filing metadata", 400);
+    if (!Number.isFinite(amount) || amount < 0 || amount > 1000000000) throw new RequestError("Invalid filing amount", 400);
 
     const { data: row, error: upErr } = await supabase
         .from("tax_filing_submissions")
         .upsert({
             company_id:    company.id,
-            form_ref:      body.formRef,
-            form_type:     body.formType,
-            period:        body.period ?? "",
-            agency:        body.agency ?? "",
-            amount:        body.amount ?? 0,
+            form_ref:      formRef,
+            form_type:     formType,
+            period,
+            agency,
+            amount,
             provider:      providerName,
             status:        "submitting",
             status_detail: null,
@@ -930,9 +949,12 @@ async function pollGeneric(providerSubmissionId: string) {
 async function getCompanyForUser(userId: string) {
     const { data, error } = await supabase
         .from("company_users")
-        .select("company_id, companies(*)")
+        .select("company_id, role, created_at, companies(*)")
         .eq("user_id", userId)
-        .single();
+        .in("role", ["owner", "admin", "accountant"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
     if (error || !data) {
         // Fallback: owner_id on companies
@@ -946,7 +968,7 @@ async function getCompanyForUser(userId: string) {
         return { ...owned, ownerEmail: authUser?.user?.email };
     }
 
-    const company = { id: data.company_id, ...(data.companies as Record<string, unknown>) } as Record<string, any>;
+    const company = { id: data.company_id, ...(data.companies as unknown as Record<string, unknown>) } as Record<string, any>;
     const { data: authUser } = await supabase.auth.admin.getUserById(userId);
     company.ownerEmail = authUser?.user?.email;
     return company;

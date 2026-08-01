@@ -11,23 +11,27 @@
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject, RequestError, requireUuid } from "../_shared/security.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY     = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const PLATFORM_URL         = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
+const PLATFORM_URL         = "http://localhost:5500";
 const RESEND_API_KEY       = Deno.env.get("RESEND_API_KEY") ?? "";
 const PLATFORM_FROM_EMAIL  = Deno.env.get("PLATFORM_FROM_EMAIL") ?? "payroll@glidepay.org";
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  "http://localhost:5500",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!jwt) return json({ error: "Unauthorized" }, 401);
@@ -35,7 +39,14 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await admin.auth.getUser(jwt);
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const body = await req.json().catch(() => ({}));
+    let body: any;
+    try {
+        body = await readJsonObject(req, 16_384);
+        const requestedAction = String(body.action || "invite");
+        if (!["invite","status"].includes(requestedAction)) throw new RequestError("Unknown action", 400);
+        await enforceUserRateLimit(admin, user.id, `invite-employee:${requestedAction}`, 10);
+        if (body.employeeId !== undefined) body.employeeId = requireUuid(body.employeeId, "employeeId");
+    } catch (err) { return errorResponse(err, CORS, "invite-employee"); }
     const action = (body.action as string) || "invite";
 
     try {
@@ -45,16 +56,16 @@ serve(async (req: Request) => {
             default:       return json({ error: `Unknown action: ${action}` }, 400);
         }
     } catch (err) {
-        console.error(`[invite-employee] ${action}:`, err);
-        return json({ error: (err as Error).message }, 500);
+        return errorResponse(err, CORS, `invite-employee:${action}`);
     }
 });
 
-async function assertAdminCompany(userId: string) {
+async function assertAdminCompany(userId: string, companyId: string) {
     const { data: membership } = await admin
         .from("company_users")
-        .select("company_id, role")
+        .select("company_id")
         .eq("user_id", userId)
+        .eq("company_id", companyId)
         .in("role", ["owner", "admin", "accountant"])
         .maybeSingle();
 
@@ -62,12 +73,11 @@ async function assertAdminCompany(userId: string) {
     return membership.company_id as string;
 }
 
-async function getEmployeeForCompany(employeeId: string, companyId: string) {
+async function getEmployee(employeeId: string) {
     const { data, error } = await admin
         .from("employees")
         .select("id, name, email, user_id, company_id, is_active")
         .eq("id", employeeId)
-        .eq("company_id", companyId)
         .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data || data.is_active === false) throw new Error("Employee not found.");
@@ -76,9 +86,9 @@ async function getEmployeeForCompany(employeeId: string, companyId: string) {
 }
 
 async function handleStatus(userId: string, body: { employeeId?: string }) {
-    const companyId = await assertAdminCompany(userId);
     if (!body.employeeId) return json({ error: "employeeId required" }, 400);
-    const emp = await getEmployeeForCompany(body.employeeId, companyId);
+    const emp = await getEmployee(body.employeeId);
+    await assertAdminCompany(userId, emp.company_id);
     return json({
         employeeId: emp.id,
         email: emp.email,
@@ -88,10 +98,9 @@ async function handleStatus(userId: string, body: { employeeId?: string }) {
 }
 
 async function handleInvite(userId: string, body: { employeeId?: string }) {
-    const companyId = await assertAdminCompany(userId);
     if (!body.employeeId) return json({ error: "employeeId required" }, 400);
-
-    const emp = await getEmployeeForCompany(body.employeeId, companyId);
+    const emp = await getEmployee(body.employeeId);
+    const companyId = await assertAdminCompany(userId, emp.company_id);
     const email = String(emp.email).trim().toLowerCase();
     const redirectTo = PLATFORM_URL;
 
@@ -157,7 +166,7 @@ async function handleInvite(userId: string, body: { employeeId?: string }) {
         .eq("id", emp.id);
     if (linkEmpErr) throw new Error(linkEmpErr.message);
 
-    // Membership so current_company_id() / announcements work; role keeps is_company_admin() false
+    // Membership enables member-scoped reads; the employee role has no admin privileges.
     const { data: existingMember } = await admin
         .from("company_users")
         .select("id, role")

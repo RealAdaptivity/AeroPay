@@ -1,0 +1,17 @@
+{
+  "name": "glidepay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GlidePay payroll and compliance application",
+  "scripts": {
+    "test": "node --test tests/*.test.js && node verify-engine.js",
+    "check:syntax": "node scripts/check-syntax.js",
+    "check:security": "node scripts/check-security.js",
+    "check:edge": "deno check supabase/functions/stripe-ach/index.ts supabase/functions/stripe-checkout/index.ts supabase/functions/stripe-connect/index.ts supabase/functions/stripe-portal/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/file-tax/index.ts supabase/functions/invite-employee/index.ts",
+    "check": "npm run check:syntax && npm run check:security && npm run check:edge && npm test",
+    "verify:sandbox": "node scripts/verify-sandbox.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

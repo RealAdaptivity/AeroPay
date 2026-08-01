@@ -12,21 +12,11 @@ const CONNECT_FUNCTION_URL = AeroConfig.connectFunctionUrl;
  * Employees without a linked account are skipped — they will need to be paid
  * via check or another method.
  */
-async function _initiateAchDisbursements(payrollRunId, activeRunData) {
+async function _initiateAchDisbursements(payrollRunId) {
     try {
         const session = await _sb.auth.getSession();
         const token   = session.data?.session?.access_token;
         if (!token) return;
-
-        // Only include employees whose net pay > 0; amounts must be whole cents
-        const disbursements = Object.entries(activeRunData)
-            .filter(([, d]) => d.results.netPay > 0)
-            .map(([empId, d]) => ({
-                employeeId:  empId,
-                netPayCents: Math.round(d.results.netPay * 100),
-            }));
-
-        if (!disbursements.length) return;
 
         const resp = await fetch(ACH_FUNCTION_URL, {
             method:  "POST",
@@ -34,7 +24,9 @@ async function _initiateAchDisbursements(payrollRunId, activeRunData) {
                 "Content-Type":  "application/json",
                 "Authorization": `Bearer ${token}`,
             },
-            body: JSON.stringify({ action: "disburse", payrollRunId, disbursements }),
+            // The Edge Function derives employees and amounts from approved
+            // payroll_line_items; the browser supplies only the run identifier.
+            body: JSON.stringify({ action: "disburse", payrollRunId }),
         });
 
         if (!resp.ok) {
@@ -53,6 +45,28 @@ async function _initiateAchDisbursements(payrollRunId, activeRunData) {
     } catch (err) {
         // Non-fatal — payroll is already saved; log and continue
         console.error("[ACH] _initiateAchDisbursements:", err.message);
+    }
+}
+
+async function _releaseHeldAchDisbursements() {
+    try {
+        const session = await _sb.auth.getSession();
+        const token = session.data?.session?.access_token;
+        if (!token) return;
+        const response = await fetch(ACH_FUNCTION_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action: "release_held" }),
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            console.warn("[ACH] held transfer release check failed:", error.error || response.status);
+        }
+    } catch (error) {
+        console.warn("[ACH] held transfer release check failed:", error.message);
     }
 }
 
@@ -254,10 +268,24 @@ const DEFAULT_STATE = {
 
 const AeroApp = {
     state: {},
+    _operations: new Set(),
     currentView: 'landing',
     currentWizardStep: 1,
     activeRunData: {}, // Calculation outputs for step 2 review
     session: null,
+
+    _beginOperation: function(key, duplicateMessage = 'That request is already being processed.') {
+        if (this._operations.has(key)) {
+            this.showToast(duplicateMessage, 'info');
+            return false;
+        }
+        this._operations.add(key);
+        return true;
+    },
+
+    _endOperation: function(key) {
+        this._operations.delete(key);
+    },
     
     init: async function() {
         this.bindEvents();
@@ -357,6 +385,7 @@ const AeroApp = {
                     userName: user.email,
                     userRole: 'Administrator',
                 };
+                await _releaseHeldAchDisbursements();
                 const isNewCompany = !this.state.settings?.setupComplete &&
                     this.state.employees.length === 0 &&
                     this.state.payrollHistory.length === 0 &&
@@ -780,10 +809,21 @@ const AeroApp = {
         
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <span class="toast-message">${message}</span>
-        `;
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('style', 'width:18px;height:18px;');
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'currentColor');
+        icon.setAttribute('stroke-width', '2.5');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('d', 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z');
+        icon.appendChild(path);
+        const messageEl = document.createElement('span');
+        messageEl.className = 'toast-message';
+        messageEl.textContent = String(message);
+        toast.append(icon, messageEl);
         
         container.appendChild(toast);
         
@@ -796,6 +836,7 @@ const AeroApp = {
 
     // Modal Control
     openModal: function(title, contentHTML, isLarge = false) {
+        this._modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         document.getElementById('modalTitle').textContent = title;
         document.getElementById('modalBodyContent').innerHTML = contentHTML;
         
@@ -809,10 +850,16 @@ const AeroApp = {
         }
         
         overlay.classList.add('active');
+        overlay.setAttribute('aria-hidden', 'false');
+        requestAnimationFrame(() => modal.focus());
     },
 
     closeModal: function() {
-        document.getElementById('modalOverlay').classList.remove('active');
+        const overlay = document.getElementById('modalOverlay');
+        overlay.classList.remove('active');
+        overlay.setAttribute('aria-hidden', 'true');
+        if (this._modalReturnFocus?.isConnected) this._modalReturnFocus.focus();
+        this._modalReturnFocus = null;
     },
 
     // --- Onboarding (New Hire) Handlers ---
@@ -898,7 +945,7 @@ const AeroApp = {
     _onboardingStateOptions: function(selected) {
         const states = [
             ['CA', 'California (CA)'], ['NY', 'New York (NY)'], ['TX', 'Texas (TX)'],
-            ['FL', 'Florida (FL)'], ['CO', 'Colorado (CO)'], ['IL', 'Illinois (IL)'],
+            ['FL', 'Florida (FL)'],
             ['WA', 'Washington (WA)'], ['GA', 'Georgia (GA)'], ['NC', 'North Carolina (NC)'],
             ['AZ', 'Arizona (AZ)'], ['OTHER', 'Other / Remote'],
         ];
@@ -1165,9 +1212,9 @@ const AeroApp = {
         const isComplete = hire.status === 'complete';
         const body = `
             <div style="margin-bottom:14px;">
-                <div style="font-weight:700;font-size:16px;">${hire.name}</div>
-                <div style="font-size:13px;color:var(--text-secondary);">${hire.role || 'Role TBD'} · ${hire.department || ''}</div>
-                <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Start: ${hire.startDate || 'TBD'} · ${hire.email}</div>
+                <div style="font-weight:700;font-size:16px;">${escapeHTML(hire.name)}</div>
+                <div style="font-size:13px;color:var(--text-secondary);">${escapeHTML(hire.role || 'Role TBD')} · ${escapeHTML(hire.department || '')}</div>
+                <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Start: ${escapeHTML(hire.startDate || 'TBD')} · ${escapeHTML(hire.email)}</div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:18px;">${stepCards}</div>
             ${isComplete ? `
@@ -1349,8 +1396,6 @@ const AeroApp = {
                             <option value="NY">New York (NY)</option>
                             <option value="TX">Texas (TX) - 0% SIT</option>
                             <option value="FL">Florida (FL) - 0% SIT</option>
-                            <option value="CO">Colorado (CO)</option>
-                            <option value="IL">Illinois (IL)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1501,15 +1546,15 @@ const AeroApp = {
                 <div class="form-grid">
                     <div class="form-group col-span-2">
                         <label for="editEmpName">Full Name</label>
-                        <input type="text" class="form-control" id="editEmpName" value="${emp.name}" required>
+                        <input type="text" class="form-control" id="editEmpName" value="${escapeAttr(emp.name)}" required maxlength="200">
                     </div>
                     <div class="form-group col-span-2">
                         <label for="editEmpEmail">Email Address</label>
-                        <input type="email" class="form-control" id="editEmpEmail" value="${emp.email}" required>
+                        <input type="email" class="form-control" id="editEmpEmail" value="${escapeAttr(emp.email)}" required maxlength="320">
                     </div>
                     <div class="form-group">
                         <label for="editEmpRole">Role / Title</label>
-                        <input type="text" class="form-control" id="editEmpRole" value="${emp.role}" required>
+                        <input type="text" class="form-control" id="editEmpRole" value="${escapeAttr(emp.role)}" required maxlength="200">
                     </div>
                     <div class="form-group">
                         <label for="editEmpState">Tax Residence State</label>
@@ -1518,8 +1563,6 @@ const AeroApp = {
                             <option value="NY" ${emp.state === 'NY' ? 'selected' : ''}>New York (NY)</option>
                             <option value="TX" ${emp.state === 'TX' ? 'selected' : ''}>Texas (TX) - 0% SIT</option>
                             <option value="FL" ${emp.state === 'FL' ? 'selected' : ''}>Florida (FL) - 0% SIT</option>
-                            <option value="CO" ${emp.state === 'CO' ? 'selected' : ''}>Colorado (CO)</option>
-                            <option value="IL" ${emp.state === 'IL' ? 'selected' : ''}>Illinois (IL)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1646,22 +1689,31 @@ const AeroApp = {
      * Creates/links a Supabase Auth user and sets employees.user_id.
      */
     inviteEmployeeToPortal: async function(id) {
+        const operationKey = `employee-invite:${id}`;
+        if (!this._beginOperation(operationKey, 'This employee invitation is already being processed.')) return;
         const emp = this.state.employees.find(e => e.id === id);
-        if (!emp) return;
-        if (!emp.email) return this.showToast('Add an email on the employee record first.', 'warning');
+        if (!emp) { this._endOperation(operationKey); return; }
+        if (!emp.email) {
+            this.showToast('Add an email on the employee record first.', 'warning');
+            this._endOperation(operationKey);
+            return;
+        }
 
         this.showToast(`Inviting ${emp.name}…`, 'info');
         try {
             const result = await AeroDB.inviteEmployeeToPortal(id);
             emp.userId = result.userId || emp.userId;
 
-            const linkHtml = result.inviteLink
+            const safeInviteLink = typeof result.inviteLink === 'string' && /^https:\/\//i.test(result.inviteLink)
+                ? result.inviteLink
+                : null;
+            const linkHtml = safeInviteLink
                 ? `<p style="font-size:12px;color:var(--text-secondary);margin:12px 0 0;word-break:break-all;">
                      Shareable sign-in link:<br>
-                     <a href="${result.inviteLink}" target="_blank" rel="noopener" style="color:var(--primary);">${result.inviteLink}</a>
+                     <a id="inviteLinkText" href="${escapeAttr(safeInviteLink)}" target="_blank" rel="noopener noreferrer" style="color:var(--primary);">${escapeHTML(safeInviteLink)}</a>
                    </p>
                    <button type="button" class="btn btn-outline" style="margin-top:10px;"
-                     onclick="navigator.clipboard.writeText(${JSON.stringify(result.inviteLink)}).then(()=>AeroApp.showToast('Link copied','success'))">
+                     onclick="AeroApp.copyElementText('inviteLinkText')">
                      Copy link
                    </button>`
                 : '';
@@ -1669,8 +1721,8 @@ const AeroApp = {
             this.openModal(
                 'Employee Portal Invite',
                 `<div style="font-size:14px;line-height:1.55;">
-                    <p style="margin:0 0 8px;"><strong>${emp.name}</strong> · ${emp.email}</p>
-                    <p style="margin:0;color:var(--text-secondary);">${result.message || 'Invite sent.'}</p>
+                    <p style="margin:0 0 8px;"><strong>${escapeHTML(emp.name)}</strong> · ${escapeHTML(emp.email)}</p>
+                    <p style="margin:0;color:var(--text-secondary);">${escapeHTML(result.message || 'Invite sent.')}</p>
                     <p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary);">
                       They should open the invite email (or the link below), set a password if prompted,
                       then sign in on glidepay.org using the <strong>Employee</strong> tab.
@@ -1686,6 +1738,19 @@ const AeroApp = {
         } catch (err) {
             console.error('[AeroApp] inviteEmployeeToPortal:', err);
             this.showToast('Invite failed: ' + (err.message || String(err)), 'danger');
+        } finally {
+            this._endOperation(operationKey);
+        }
+    },
+
+    copyElementText: async function(elementId) {
+        const value = document.getElementById(elementId)?.textContent || '';
+        if (!value) return;
+        try {
+            await navigator.clipboard.writeText(value);
+            this.showToast('Link copied', 'success');
+        } catch (_) {
+            this.showToast('Could not copy the link automatically.', 'warning');
         }
     },
 
@@ -1696,11 +1761,11 @@ const AeroApp = {
         
         const hourlyEmps = this.state.employees.filter(e => e.type === 'hourly');
         if (hourlyEmps.length === 0) {
-            select.innerHTML = `<option value="">No hourly staff onboarded</option>`;
+            select.replaceChildren(new Option('No hourly staff onboarded', ''));
             return;
         }
 
-        select.innerHTML = hourlyEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+        select.replaceChildren(...hourlyEmps.map(e => new Option(String(e.name || ''), String(e.id || ''))));
     },
 
     loadEmployeeTimesheet: function() {
@@ -1836,10 +1901,10 @@ const AeroApp = {
                 <tr id="wizard-row-${emp.id}">
                     <td>
                         <div style="display:flex; align-items:center;">
-                            <div style="font-weight:600;">${emp.name}</div>
+                            <div style="font-weight:600;">${escapeHTML(emp.name)}</div>
                             ${is1099 ? '<span class="badge badge-warning" style="margin-left: 6px; font-size:10px; padding:1px 4px;">1099</span>' : '<span class="badge badge-success" style="margin-left: 6px; font-size:10px; padding:1px 4px;">W-2</span>'}
                         </div>
-                        <div style="font-size:11px; color:var(--text-tertiary);">${emp.role}</div>
+                        <div style="font-size:11px; color:var(--text-tertiary);">${escapeHTML(emp.role)}</div>
                     </td>
                     <td>
                         <div style="font-size:13px; font-weight:600;">${emp.type === 'salaried' ? formatCurrency(emp.rate) + (is1099 ? '/run' : '/yr') : formatCurrency(emp.rate) + '/hr'}</div>
@@ -1927,6 +1992,19 @@ const AeroApp = {
 
         this.activeRunData = {}; // Clear previous evaluations
 
+        const unsupported = this.state.employees.find(emp =>
+            emp.classification !== '1099' && !SUPPORTED_TAX_STATES.includes(emp.state)
+        );
+        if (unsupported) {
+            body.replaceChildren();
+            const row = body.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = 8;
+            cell.textContent = `Payroll blocked: state tax calculation is not supported for ${unsupported.state}.`;
+            this.showToast(cell.textContent, 'danger');
+            return;
+        }
+
         let html = "";
         this.state.employees.forEach(emp => {
             // Find input values from DOM Step 1
@@ -2012,10 +2090,10 @@ const AeroApp = {
                 <tr style="cursor:pointer;" onclick="AeroApp.previewEmployeePaystub('${emp.id}')" title="Click to view detailed pay stub">
                     <td>
                         <div style="display:flex; align-items:center;">
-                            <div style="font-weight:600; text-decoration: underline; color: var(--primary);">${emp.name}</div>
+                            <div style="font-weight:600; text-decoration: underline; color: var(--primary);">${escapeHTML(emp.name)}</div>
                             ${is1099 ? '<span class="badge badge-warning" style="margin-left: 6px; font-size:10px; padding:1px 4px;">1099</span>' : '<span class="badge badge-success" style="margin-left: 6px; font-size:10px; padding:1px 4px;">W-2</span>'}
                         </div>
-                        <div style="font-size:11px; color:var(--text-tertiary);">${emp.role}</div>
+                        <div style="font-size:11px; color:var(--text-tertiary);">${escapeHTML(emp.role)}</div>
                     </td>
                     <td style="font-weight:600;">${formatCurrency(calculations.grossPay)}</td>
                     <td>${is1099 ? '--' : formatCurrency(calculations.taxes.federalIncomeTax)}</td>
@@ -2072,6 +2150,8 @@ const AeroApp = {
     },
 
     submitPayrollRun: async function() {
+        const operationKey = 'payroll:submit';
+        if (!this._beginOperation(operationKey, 'Payroll submission is already in progress.')) return;
         let grossPayrollSum = 0, employerTaxesSum = 0, totalCostSum = 0;
         Object.values(this.activeRunData).forEach(data => {
             grossPayrollSum  += data.results.grossPay;
@@ -2096,7 +2176,11 @@ const AeroApp = {
             await this._refreshState();
             this.showToast('Payroll submitted for approval.', 'success');
             this.navigateTo('approvals');
-        } catch (err) { this.showToast('Payroll submission failed: ' + err.message, 'danger'); }
+        } catch (err) {
+            this.showToast('Payroll submission failed: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
+        }
     },
 
     /**
@@ -2115,14 +2199,18 @@ const AeroApp = {
     },
 
     approvePayroll: async function(apprId) {
+        const operationKey = `payroll:approve:${apprId}`;
+        if (!this._beginOperation(operationKey, 'This payroll approval is already in progress.')) return;
         const appr = (this.state.payrollApprovals || []).find(a => a.id === apprId);
         if (!appr || appr.status !== 'pending') {
             this.showToast('This payroll run is not pending approval.', 'warning');
+            this._endOperation(operationKey);
             return;
         }
         const run = (this.state.payrollHistory || []).find(r => r.id === appr.runId);
         if (!run) {
             this.showToast('Payroll run details not found.', 'danger');
+            this._endOperation(operationKey);
             return;
         }
         try {
@@ -2162,13 +2250,15 @@ const AeroApp = {
                 );
             }
 
-            await _initiateAchDisbursements(appr.runId, activeRunData);
+            await _initiateAchDisbursements(appr.runId);
 
             await this._refreshState();
             this.showToast('Payroll approved! ACH transfers are being processed.', 'success');
             this.navigateTo('approvals');
         } catch (err) {
             this.showToast('Failed to approve payroll: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
         }
     },
 
@@ -2199,7 +2289,7 @@ const AeroApp = {
                 const emp = this.state.employees.find(e => e.id === empId) || { name: "Employee" };
                 detailsRows += `
                     <tr>
-                        <td style="font-weight:600;">${emp.name}</td>
+                        <td style="font-weight:600;">${escapeHTML(emp.name)}</td>
                         <td>${formatCurrency(det.grossPay)}</td>
                         <td>${formatCurrency(det.taxes.totalEmployeeTaxes)}</td>
                         <td style="color:var(--success); font-weight:700;">${formatCurrency(det.netPay)}</td>
@@ -2319,6 +2409,8 @@ const AeroApp = {
             `E-file ${formType} for ${period} with ${agency} through your connected provider?\n\n` +
             `This transmits the filing electronically.`
         )) return;
+        const operationKey = `efile:${formRef}`;
+        if (!this._beginOperation(operationKey, 'This filing is already being submitted.')) return;
 
         // Optimistic "submitting" state so the row updates immediately.
         this._setLocalFiling(formRef, { form_ref: formRef, form_type: formType, period, agency, amount, status: 'submitting' });
@@ -2366,6 +2458,8 @@ const AeroApp = {
             this._setLocalFiling(formRef, null);
             if (this.currentView === 'tax-compliance') this.navigateTo('tax-compliance');
             this.showToast('E-file failed: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
         }
     },
 
@@ -2399,18 +2493,18 @@ const AeroApp = {
     populateW2Selectors: function() {
         const select = document.getElementById('w2EmployeeSelect');
         if (select) {
-            select.innerHTML = this.state.employees
+            const options = this.state.employees
                 .filter(e => e.classification !== '1099')
-                .map(e => `<option value="${e.id}">${e.name}</option>`)
-                .join('');
+                .map(e => new Option(String(e.name || ''), String(e.id || '')));
+            select.replaceChildren(...options);
         }
         
         const selectNec = document.getElementById('necContractorSelect');
         if (selectNec) {
-            selectNec.innerHTML = this.state.employees
+            const options = this.state.employees
                 .filter(e => e.classification === '1099')
-                .map(e => `<option value="${e.id}">${e.name}</option>`)
-                .join('');
+                .map(e => new Option(String(e.name || ''), String(e.id || '')));
+            selectNec.replaceChildren(...options);
         }
     },
 
@@ -2527,12 +2621,12 @@ const AeroApp = {
 
         body.innerHTML = this.state.syncLogs.map(log => `
             <tr>
-                <td style="font-weight:600;">${log.date}</td>
-                <td><span class="badge badge-info">${log.type}</span></td>
-                <td><div style="font-size:12px; max-width: 250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${log.details}</div></td>
+                <td style="font-weight:600;">${escapeHTML(log.date)}</td>
+                <td><span class="badge badge-info">${escapeHTML(log.type)}</span></td>
+                <td><div style="font-size:12px; max-width: 250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHTML(log.details)}</div></td>
                 <td>${formatCurrency(log.debit)}</td>
                 <td>${formatCurrency(log.credit)}</td>
-                <td><span class="badge badge-success">${log.status}</span></td>
+                <td><span class="badge badge-success">${escapeHTML(log.status)}</span></td>
             </tr>
         `).join('');
     },
@@ -2682,9 +2776,15 @@ const AeroApp = {
      * webhook auto-provisions the Treasury Financial Account.
      */
     startConnectOnboarding: async function() {
+        const operationKey = 'stripe:connect-onboarding';
+        if (!this._beginOperation(operationKey, 'Stripe onboarding is already opening.')) return;
         const session = await _sb.auth.getSession();
         const token   = session.data?.session?.access_token;
-        if (!token) { this.showToast('Please sign in first.', 'warning'); return; }
+        if (!token) {
+            this.showToast('Please sign in first.', 'warning');
+            this._endOperation(operationKey);
+            return;
+        }
 
         const company = this.state.settings;
         this.showToast('Opening Stripe onboarding…', 'info');
@@ -2708,6 +2808,8 @@ const AeroApp = {
             window.location.href = url;
         } catch (err) {
             this.showToast('Onboarding failed: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
         }
     },
 
@@ -3105,6 +3207,12 @@ const AeroApp = {
         this.previewEmployeePaystubFromId(employeeId, runId);
     },
 
+    showEmployeeOnboardingDoc: function(type, employeeId) {
+        const employee = this.state.employees.find(e => e.id === employeeId);
+        if (!employee) return this.showToast('Employee not found.', 'danger');
+        this.showOnboardingDoc(type, employee.name, employee.filingStatus);
+    },
+
     showOnboardingDoc: function(type, name, filingStatus) {
         const html = `
             <div style="background-color:#fffdf5; border:1px solid #94a3b8; padding:30px; font-family:var(--font-body); border-radius:var(--radius-md); box-shadow:var(--shadow-lg);">
@@ -3117,7 +3225,7 @@ const AeroApp = {
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; font-size:13px; line-height:1.6;">
                     <div>
-                        <p><strong>Employee Name:</strong> ${name}</p>
+                        <p><strong>Employee Name:</strong> ${escapeHTML(name)}</p>
                         <p><strong>Filing Status:</strong> ${filingStatus === 'married' ? 'Married Filing Jointly' : 'Single'}</p>
                         <p><strong>Security Number (SSN):</strong> XXX-XX-4928</p>
                     </div>
@@ -3212,12 +3320,14 @@ const AeroApp = {
      * numbers ever touching our servers.
      */
     linkAchBankAccount: async function(employeeId) {
+        const operationKey = `bank-link:${employeeId}`;
+        if (!this._beginOperation(operationKey, 'Bank account setup is already in progress.')) return;
         const emp = this.state.employees.find(e => e.id === employeeId);
-        if (!emp) return;
+        if (!emp) { this._endOperation(operationKey); return; }
 
         const session = await _sb.auth.getSession();
         const token   = session.data?.session?.access_token;
-        if (!token) { this.showToast('Please sign in first.', 'warning'); return; }
+        if (!token) { this.showToast('Please sign in first.', 'warning'); this._endOperation(operationKey); return; }
 
         this.showToast('Opening bank account setup…', 'info');
 
@@ -3278,23 +3388,31 @@ const AeroApp = {
             this.navigateTo('employee-dashboard');
         } catch (err) {
             this.showToast('Bank account setup failed: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
         }
     },
 
     requestPayAdvance: async function(e) {
         e.preventDefault();
         const employeeId = this.session.employeeId;
+        const operationKey = `pay-advance:${employeeId}`;
+        if (!this._beginOperation(operationKey, 'A pay advance request is already being processed.')) return;
         const amount = parseFloat(document.getElementById('advanceReqAmount').value) || 0;
-        if (amount <= 0 || amount > 200) { this.showToast('Please request an amount between $10 and $200.', 'warning'); return; }
+        if (amount < 10 || amount > 200) { this.showToast('Please request an amount between $10 and $200.', 'warning'); this._endOperation(operationKey); return; }
         if (this.state.payAdvances.some(a => a.empId === employeeId && (a.status === 'pending' || a.status === 'approved'))) {
-            this.showToast('You already have an outstanding pay advance request.', 'danger'); return;
+            this.showToast('You already have an outstanding pay advance request.', 'danger'); this._endOperation(operationKey); return;
         }
         try {
             await AeroDB.requestPayAdvance(employeeId, amount);
             this.state.payAdvances = await AeroDB.getPayAdvances();
             this.showToast(`Pay advance of ${formatCurrency(amount)} requested successfully.`, 'success');
             this.navigateTo('employee-dashboard');
-        } catch (err) { this.showToast('Failed to request advance: ' + err.message, 'danger'); }
+        } catch (err) {
+            this.showToast('Failed to request advance: ' + err.message, 'danger');
+        } finally {
+            this._endOperation(operationKey);
+        }
     },
 
     approvePayAdvance: async function(advId) {

@@ -196,5 +196,5 @@ assertEqual(result4.hasSplit, true, "Has Split Direct Deposit");
 assertEqual(result4.netPayChecking, 2790.36, "Checking Direct Deposit Split (80%)");
 assertEqual(result4.netPaySavings, 697.59, "Savings Direct Deposit Split (20%)");
 
-console.log("\nAll payroll mathematical assertions match IRS specifications! Engine is certified exact.");
+console.log("\nAll sandbox payroll regression assertions passed. Independent tax-provider certification is still required for production.");
 
