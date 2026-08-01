@@ -2299,44 +2299,35 @@ function renderLandingPageView(state) {
                     <div class="logo-box"><img src="assets/logo.svg" alt="" width="40" height="40"></div>
                     <div class="logo-text">GlidePay</div>
                 </div>
+                <nav class="landing-nav" aria-label="Product">
+                    <a href="#product" class="landing-nav-link">Product</a>
+                    <a href="#payroll" class="landing-nav-link">Payroll</a>
+                    <a href="#tax" class="landing-nav-link">Tax</a>
+                    <a href="#how" class="landing-nav-link">How it works</a>
+                    <a href="#login" class="landing-nav-cta" onclick="document.getElementById('login')?.scrollIntoView({behavior:'smooth'})">Sign in</a>
+                </nav>
                 <div>
-                    <!-- Theme Toggle -->
-                    <button class="btn-icon-only theme-toggle-landing" onclick="AeroApp.toggleTheme()" title="Toggle Light/Dark Theme" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:10px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">
+                    <button class="btn-icon-only theme-toggle-landing" onclick="AeroApp.toggleTheme()" title="Toggle Light/Dark Theme" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:var(--radius-md); padding:10px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; color:#e2e8f0;">
                         <svg style="width:20px;height:20px;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
                     </button>
                 </div>
             </header>
 
-            <main class="landing-hero-container">
-                <div class="landing-hero-text">
-                    <span class="landing-badge">Compliance Ops</span>
-                    <h1 class="landing-title">GlidePay<br><span>Payroll control. Tax certainty.</span></h1>
+            <main class="landing-hero-container" id="login">
+                <div class="landing-hero-text landing-reveal">
+                    <h1 class="landing-title">GlidePay</h1>
+                    <p class="landing-title-sub">Payroll control. Tax certainty.</p>
                     <p class="landing-desc">
-                        Run ACH payroll, transmit filings, and track tax deposits from one ops surface — built for teams that treat payday and compliance as the same job.
+                        One ops surface for ACH payday, Form 941 e-file, and deposit tracking — so finance and compliance stay on the same clock.
                     </p>
-                    
-                    <div class="landing-bullets">
-                        <div class="landing-bullet">
-                            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span>Guaranteed 50-State Compliance</span>
-                        </div>
-                        <div class="landing-bullet">
-                            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span>Same-Day direct ACH settlement</span>
-                        </div>
-                        <div class="landing-bullet">
-                            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span>Native Timesheets & Time Tracking</span>
-                        </div>
-                        <div class="landing-bullet">
-                            <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span>Real-time Ledger Sync (QuickBooks/Xero)</span>
-                        </div>
+                    <div class="landing-hero-actions">
+                        <a href="#product" class="btn btn-primary">See the product</a>
+                        <button type="button" class="btn btn-outline landing-hero-secondary" onclick="AeroApp.switchLoginTab('register')">Start free trial</button>
                     </div>
                 </div>
 
                 <!-- Auth Card -->
-                <div class="login-card">
+                <div class="login-card landing-reveal landing-reveal-delay">
                     <div class="login-header-text">
                         <h2 class="login-title" id="loginCardTitle">Secure Login Portal</h2>
                         <p class="login-subtitle" id="loginCardSubtitle">Authenticate to view payroll data</p>
@@ -2452,17 +2443,95 @@ function renderLandingPageView(state) {
                     <div class="login-security-row">
                         <span class="login-security-badge"><svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg> 256-bit SSL</span>
                         <span class="login-security-badge"><svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg> SOC 2 Ready</span>
-                        <span class="login-security-badge"><svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Powered by Supabase</span>
+                        <span class="login-security-badge"><svg style="width:12px;height:12px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Stripe + TaxBandit</span>
                     </div>
                 </div>
             </main>
 
+            <!-- Product overview -->
+            <section class="lp-section lp-product" id="product">
+                <div class="lp-section-inner landing-reveal">
+                    <h2 class="lp-heading">The compliance ops desk</h2>
+                    <p class="lp-lead">GlidePay is B2B payroll software for companies that need ACH deposits and tax filings in one place — not a pile of HR tools bolted together after payday.</p>
+                </div>
+                <figure class="lp-shot lp-shot-hero landing-reveal landing-reveal-delay">
+                    <img src="assets/marketing/product-dashboard.jpg" alt="GlidePay dashboard showing next payday, payroll spend, and ACH run status" width="1400" height="788" loading="lazy">
+                </figure>
+            </section>
+
+            <!-- Run payroll -->
+            <section class="lp-section lp-feature" id="payroll">
+                <div class="lp-feature-grid">
+                    <div class="lp-feature-copy landing-reveal">
+                        <h2 class="lp-heading">Run payroll like a control tower</h2>
+                        <p class="lp-lead">Enter hours, review withholdings, approve the run, and transmit ACH from a single wizard. Net pay, employer tax, and deposit totals stay visible while you work.</p>
+                        <ul class="lp-points">
+                            <li>W-2 and 1099 in the same run</li>
+                            <li>Stripe Connect + Treasury for employee ACH</li>
+                            <li>Approval queue before money moves</li>
+                        </ul>
+                    </div>
+                    <figure class="lp-shot landing-reveal landing-reveal-delay">
+                        <img src="assets/marketing/product-payroll.jpg" alt="GlidePay Run Payroll wizard with employee hours grid and transmit panel" width="1400" height="788" loading="lazy">
+                    </figure>
+                </div>
+            </section>
+
+            <!-- Tax -->
+            <section class="lp-section lp-feature lp-feature-alt" id="tax">
+                <div class="lp-feature-grid lp-feature-grid-reverse">
+                    <div class="lp-feature-copy landing-reveal">
+                        <h2 class="lp-heading">File taxes from the same surface</h2>
+                        <p class="lp-lead">Form 941 quarters, e-file status, and tax deposit timing sit next to payroll — so filing day is not a separate product you only open in a panic.</p>
+                        <ul class="lp-points">
+                            <li>TaxBandit e-file for Form 941 (sandbox &amp; live)</li>
+                            <li>Filing queue with EIN, quarter, and status</li>
+                            <li>Audit trail when transmits succeed or fail</li>
+                        </ul>
+                    </div>
+                    <figure class="lp-shot landing-reveal landing-reveal-delay">
+                        <img src="assets/marketing/product-tax.jpg" alt="GlidePay Tax Compliance Hub with Form 941 filing queue" width="1400" height="788" loading="lazy">
+                    </figure>
+                </div>
+            </section>
+
+            <!-- How it works -->
+            <section class="lp-section lp-how" id="how">
+                <div class="lp-section-inner landing-reveal">
+                    <h2 class="lp-heading">How GlidePay works</h2>
+                    <p class="lp-lead">Three steps from company setup to payday and filings.</p>
+                    <ol class="lp-steps">
+                        <li>
+                            <span class="lp-step-num">01</span>
+                            <div>
+                                <h3>Connect the company</h3>
+                                <p>Create your account, add your EIN, complete Stripe Connect onboarding, and invite employees to the portal.</p>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="lp-step-num">02</span>
+                            <div>
+                                <h3>Run and approve payroll</h3>
+                                <p>Pull hours, calculate taxes and benefits, send for approval, then disburse ACH to verified employee bank accounts.</p>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="lp-step-num">03</span>
+                            <div>
+                                <h3>E-file and track deposits</h3>
+                                <p>Prepare Form 941 for the quarter, transmit electronically, and keep deposit and acknowledgement status visible.</p>
+                            </div>
+                        </li>
+                    </ol>
+                </div>
+            </section>
+
             <!-- Competitor Comparison Section -->
-            <section class="comparison-section">
+            <section class="comparison-section" id="compare">
                 <div class="comparison-header">
-                    <h2 class="comparison-section-title">Engineered to Outperform Legacy Systems</h2>
+                    <h2 class="comparison-section-title">Built to replace legacy payroll stacks</h2>
                     <p class="landing-desc" style="max-width:700px; margin: 0 auto;">
-                        See how GlidePay compares head-to-head with traditional payroll providers like Gusto, ADP, Rippling, and Paychex.
+                        Side-by-side with Gusto, ADP, Rippling, and Paychex on price, ACH speed, and compliance automation.
                     </p>
                     <div class="comparison-filters">
                         <button class="filter-btn active" id="btnFilterAll" onclick="AeroApp.filterComparisonTable('all')">Show All Features</button>
@@ -2567,6 +2636,14 @@ function renderLandingPageView(state) {
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </section>
+
+            <section class="lp-cta-band">
+                <div class="lp-section-inner landing-reveal">
+                    <h2 class="lp-heading">Ready to run payroll with tax on the same desk?</h2>
+                    <p class="lp-lead">Open a free trial, connect Stripe, and process your first sandbox payday in minutes.</p>
+                    <a href="#login" class="btn btn-primary" onclick="document.getElementById('login')?.scrollIntoView({behavior:'smooth'}); AeroApp.switchLoginTab('register'); return false;">Create your company account</a>
                 </div>
             </section>
         </div>
