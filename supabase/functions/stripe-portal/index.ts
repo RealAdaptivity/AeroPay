@@ -11,21 +11,31 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject } from "../_shared/security.ts";
 
-const stripe   = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { apiVersion: "2024-06-20" });
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+const stripe   = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
+const PLATFORM_URL = "http://localhost:5500";
+const CORS_ORIGIN = "http://localhost:5500";
 
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  CORS_ORIGIN,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    if (!/^(sk|rk)_test_/.test(STRIPE_SECRET_KEY)) {
+        return json({ error: "Sandbox deployment requires a Stripe test key" }, 503);
+    }
 
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!jwt) return json({ error: "Unauthorized" }, 401);
@@ -33,15 +43,19 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const { returnUrl } = await req.json();
+    try {
+        await readJsonObject(req, 4_096);
+        await enforceUserRateLimit(supabase, user.id, "stripe-portal:create", 10);
+    } catch (err) { return errorResponse(err, CORS, "stripe-portal"); }
 
     try {
         // Resolve company for this user
         const { data: companyUser } = await supabase
             .from("company_users")
-            .select("company_id")
+            .select("company_id, role, created_at")
             .eq("user_id", user.id)
-            .single();
+            .in("role", ["owner", "admin"])
+            .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
         if (!companyUser) return json({ error: "Company not found" }, 404);
 
@@ -58,13 +72,12 @@ serve(async (req: Request) => {
 
         const portalSession = await stripe.billingPortal.sessions.create({
             customer:   sub.stripe_customer_id,
-            return_url: returnUrl || "https://ojvnxnlrghatkwjrlnop.supabase.co",
+            return_url: PLATFORM_URL,
         });
 
         return json({ url: portalSession.url });
     } catch (err) {
-        console.error("[stripe-portal]", err);
-        return json({ error: err.message }, 500);
+        return errorResponse(err, CORS, "stripe-portal:create");
     }
 });
 

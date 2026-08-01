@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://ojvnxnlrghatkwjrlnop.supabase.co wss://ojvnxnlrghatkwjrlnop.supabase.co; frame-src https://js.stripe.com https://hooks.stripe.com; form-action 'self'; upgrade-insecure-requests">
     <title>GlidePay | Enterprise Payroll & Compliance</title>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
@@ -195,18 +198,18 @@
             
             <!-- Dynamic Content Area -->
             <div id="aeroBillingBanner" style="display:none; padding:12px 24px 0;"></div>
-            <div class="view-container" id="mainViewContent">
+            <div class="view-container" id="mainViewContent" tabindex="-1">
                 <!-- Injected via routing -->
             </div>
         </main>
     </div>
     
     <!-- Unified Modals Interface Overlay -->
-    <div class="modal-overlay" id="modalOverlay">
-        <div class="modal">
+    <div class="modal-overlay" id="modalOverlay" aria-hidden="true">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
             <div class="modal-header">
                 <h3 class="modal-title" id="modalTitle">Modal Title</h3>
-                <button class="modal-close" title="Close dialog">
+                <button class="modal-close" type="button" title="Close dialog" aria-label="Close dialog">
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
@@ -217,10 +220,10 @@
     </div>
     
     <!-- Toast Notifications Container -->
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <!-- Scripts Loading Sequence -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/dist/umd/supabase.js"></script>
     <script src="config.js"></script>
     <script src="supabase.js"></script>
     <script src="billing.js"></script>

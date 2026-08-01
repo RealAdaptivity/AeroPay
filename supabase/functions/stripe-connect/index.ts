@@ -15,23 +15,31 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject, RequestError } from "../_shared/security.ts";
 
-const stripe   = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { apiVersion: "2024-06-20" });
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+const stripe   = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  "http://localhost:5500",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
-const PLATFORM_URL = Deno.env.get("PLATFORM_URL") ?? "https://glidepay.org";
+const PLATFORM_URL = "http://localhost:5500";
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    if (!/^(sk|rk)_test_/.test(STRIPE_SECRET_KEY)) {
+        return json({ error: "Sandbox deployment requires a Stripe test key" }, 503);
+    }
 
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
     if (!jwt) return json({ error: "Unauthorized" }, 401);
@@ -39,7 +47,13 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const body   = await req.json();
+    let body: any;
+    try {
+        body = await readJsonObject(req, 16_384);
+        const requestedAction = String(body.action || "");
+        if (!["create_account","refresh_account_link","get_status","create_financial_account"].includes(requestedAction)) throw new RequestError("Unknown action", 400);
+        await enforceUserRateLimit(supabase, user.id, `stripe-connect:${requestedAction}`, 20);
+    } catch (err) { return errorResponse(err, CORS, "stripe-connect"); }
     const action = body.action as string;
 
     try {
@@ -51,8 +65,7 @@ serve(async (req: Request) => {
             default:                       return json({ error: `Unknown action: ${action}` }, 400);
         }
     } catch (err) {
-        console.error(`[stripe-connect] ${action}:`, err);
-        return json({ error: err.message }, 500);
+        return errorResponse(err, CORS, `stripe-connect:${action}`);
     }
 });
 
@@ -65,23 +78,26 @@ async function handleCreateAccount(userId: string, body: { companyName?: string;
         return await buildAccountLink(company.stripe_account_id, company.id);
     }
 
-    const account = await stripe.accounts.create({
-        type: "custom",
-        country: "US",
-        capabilities: {
-            treasury:                     { requested: true },
-            us_bank_account_ach_payments: { requested: true },
-            transfers:                    { requested: true },
+    const account = await stripe.accounts.create(
+        {
+            type: "custom",
+            country: "US",
+            capabilities: {
+                treasury:                     { requested: true },
+                us_bank_account_ach_payments: { requested: true },
+                transfers:                    { requested: true },
+            },
+            business_type: "company",
+            business_profile: {
+                name: company.name,
+                // MCC 7372 = Prepackaged Software (payroll SaaS)
+                mcc: "7372",
+                url: PLATFORM_URL,
+            },
+            metadata: { company_id: company.id },
         },
-        business_type: "company",
-        business_profile: {
-            name: body.companyName ?? company.name,
-            // MCC 7372 = Prepackaged Software (payroll SaaS)
-            mcc: "7372",
-            url: PLATFORM_URL,
-        },
-        metadata: { company_id: company.id },
-    });
+        { idempotencyKey: `connect-account:${company.id}` },
+    );
 
     // Persist account ID immediately so we can handle webhooks
     await supabase.from("companies").update({
@@ -141,7 +157,10 @@ async function handleGetStatus(userId: string) {
                         intra_stripe_flows:  { requested: true },
                     },
                 },
-                { stripeAccount: company.stripe_account_id as string },
+                {
+                    stripeAccount: company.stripe_account_id as string,
+                    idempotencyKey: `financial-account:${company.id}`,
+                },
             );
             updates.stripe_financial_account_id = fa.id;
             updates.stripe_account_status = "active";
@@ -225,7 +244,10 @@ async function handleCreateFinancialAccount(userId: string) {
                 intra_stripe_flows:  { requested: true },
             },
         },
-        { stripeAccount: company.stripe_account_id },
+        {
+            stripeAccount: company.stripe_account_id,
+            idempotencyKey: `financial-account:${company.id}`,
+        },
     );
 
     await supabase.from("companies").update({
@@ -249,12 +271,13 @@ async function handleCreateFinancialAccount(userId: string) {
 async function getCompanyForUser(userId: string) {
     const { data, error } = await supabase
         .from("company_users")
-        .select("company_id, companies(*)")
+        .select("company_id, role, created_at, companies(*)")
         .eq("user_id", userId)
-        .single();
+        .in("role", ["owner", "admin"])
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
     if (error || !data) throw new Error("Company not found for user");
-    return { id: data.company_id, ...(data.companies as Record<string, unknown>) } as Record<string, any>;
+    return { id: data.company_id, ...(data.companies as unknown as Record<string, unknown>) } as Record<string, any>;
 }
 
 async function buildAccountLink(stripeAccountId: string, companyId: string) {

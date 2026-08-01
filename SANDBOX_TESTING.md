@@ -3,6 +3,11 @@
 
 See also [GO_LIVE.md](./GO_LIVE.md) for cutover steps.
 
+> **Current deployment lock:** the deployed Edge Functions accept only
+> `http://localhost:5500` and reject any Stripe secret key that is not a test
+> key. This is deliberate protection while validating payroll. Remove this
+> lock only as part of the live cutover checklist.
+
 ---
 
 ## Prerequisites
@@ -27,7 +32,7 @@ Sandbox publishable key + price IDs are set for **GlidePay Test** (`acct_1TkoXCA
 - Seat: `price_1TzIdbAsgAzfeB6D0GyWkgXK` ($4/mo, metadata `type=per_seat`)
 - Test webhook registered → `…/functions/v1/stripe-webhook` (Connect + Treasury outbound transfer events)
 
-When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Force sandbox on the live domain with `?sandbox=1`.
+When you open the app on `localhost`, `config.js` automatically uses `SANDBOX`. Public and preview hosts cannot be switched to sandbox from the browser.
 
 ### Edge function secrets (Supabase)
 
@@ -36,7 +41,10 @@ Swap to test-mode keys so edge functions hit the Stripe sandbox:
 ```bash
 supabase secrets set STRIPE_SECRET_KEY=sk_test_YOUR_KEY_HERE
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_YOUR_TEST_WEBHOOK_SECRET
-supabase secrets set PLATFORM_URL=http://localhost:5500   # or your dev URL
+supabase secrets set STRIPE_PRICE_BASE_ID=price_1TzIdaAsgAzfeB6DKeordaY7
+supabase secrets set STRIPE_PRICE_SEAT_ID=price_1TzIdbAsgAzfeB6D0GyWkgXK
+supabase secrets set PLATFORM_URL=http://localhost:5500
+supabase secrets set CORS_ALLOWED_ORIGIN=http://localhost:5500
 # Optional — for alert emails:
 supabase secrets set RESEND_API_KEY=re_YOUR_KEY
 supabase secrets set PLATFORM_FROM_EMAIL=onboarding@resend.dev
@@ -44,7 +52,7 @@ supabase secrets set PLATFORM_FROM_EMAIL=onboarding@resend.dev
 
 > To restore live keys after testing: `supabase secrets set STRIPE_SECRET_KEY=sk_live_…`
 
-Or use `bash scripts/set-supabase-secrets.sh sandbox` after exporting the two Stripe vars.
+Or use `bash scripts/set-supabase-secrets.sh sandbox` after exporting the Stripe secret, webhook secret, and both price IDs.
 
 ### Create test-mode prices (only if starting fresh)
 
@@ -80,7 +88,16 @@ supabase functions deploy stripe-checkout
 supabase functions deploy stripe-portal
 supabase functions deploy stripe-webhook --no-verify-jwt
 supabase functions deploy file-tax
+supabase functions deploy invite-employee
 ```
+
+Run the read-only endpoint preflight after deployment:
+
+```bash
+npm run verify:sandbox
+```
+
+It confirms every authenticated function exposes only the configured localhost origin and that the webhook rejects unsigned requests.
 
 ### 3b. TaxBandit e-file (sandbox)
 
@@ -217,6 +234,9 @@ Use the failure accounts to test webhook handling of `treasury.outbound_transfer
 - [ ] Supabase secrets updated to `sk_test_…` from GlidePay Test
 - [ ] DB migrations applied (`supabase db push`)
 - [ ] All edge functions deployed
+- [ ] `npm run verify:sandbox` passes
+- [ ] `stripe_webhook_events` records each event once
+- [ ] Repeating the same approved payroll produces no duplicate `ach_transfers` or Stripe OutboundPayment
 - [ ] Test webhook endpoint registered with "connected accounts" events enabled
 - [ ] Company onboarding completed → status shows **Active**
 - [ ] Employee bank account linked → audit log + alert email received

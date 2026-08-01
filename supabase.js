@@ -6,7 +6,7 @@
  * URL     : https://ojvnxnlrghatkwjrlnop.supabase.co
  *
  * Usage in app.js / index.html:
- *   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/dist/umd/supabase.js"></script>
  *   <script src="supabase.js"></script>
  *   <!-- then payroll-engine.js, components.js, app.js -->
  */

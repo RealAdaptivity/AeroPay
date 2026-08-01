@@ -23,6 +23,7 @@ const PRICE_SEAT_ID          = AeroConfig.priceSeatId;
 // PUBLIC API
 // ─────────────────────────────────────────────
 const AeroBilling = {
+    _operations: new Set(),
 
     /**
      * Start a Stripe Checkout session for a new subscription (with free trial).
@@ -31,6 +32,11 @@ const AeroBilling = {
      * @param {number} employeeCount  Number of employees (drives seat price quantity)
      */
     async startCheckout(employeeCount = 1) {
+        if (this._operations.has('checkout')) {
+            AeroApp.showToast('Stripe Checkout is already opening.', 'info');
+            return;
+        }
+        this._operations.add('checkout');
         try {
             const session = await _sb.auth.getSession();
             const token   = session.data?.session?.access_token;
@@ -40,13 +46,10 @@ const AeroBilling = {
                 return;
             }
 
-            // Resolve at click-time so config.js sandbox fallback always wins.
-            const priceBaseId = AeroConfig.priceBaseId;
-            const priceSeatId = AeroConfig.priceSeatId;
-            if (!priceBaseId || priceBaseId.includes("REPLACE")
-                || !priceSeatId || priceSeatId.includes("REPLACE")) {
+            // Resolve at click-time and fail closed if the environment is not provisioned.
+            if (!AeroConfig.billingConfigured) {
                 AeroApp.showToast(
-                    "Billing prices are not configured. Hard-refresh, or open with ?sandbox=1.",
+                    "Billing is not configured for this environment. Contact support.",
                     "danger"
                 );
                 return;
@@ -54,24 +57,15 @@ const AeroBilling = {
 
             AeroApp.showToast("Opening Stripe Checkout…", "info");
 
-            const company = await AeroDB.getCompany();
-
             const resp = await fetch(CHECKOUT_FUNCTION_URL, {
                 method:  "POST",
                 headers: {
                     "Content-Type":  "application/json",
                     "Authorization": `Bearer ${token}`,
                 },
-                body: JSON.stringify({
-                    companyId:     company.id,
-                    companyName:   company.name,
-                    employeeCount: Math.max(1, employeeCount),
-                    priceBaseId,
-                    priceSeatId,
-                    trialDays:     AeroConfig.trialDays ?? 14,
-                    successUrl:    window.location.origin + window.location.pathname + "?checkout=success",
-                    cancelUrl:     window.location.origin + window.location.pathname + "?checkout=canceled",
-                }),
+                // Tenant, prices, quantity, trial, and redirects are resolved by
+                // the server from authenticated state and trusted secrets.
+                body: JSON.stringify({ action: "checkout" }),
             });
 
             if (!resp.ok) {
@@ -89,6 +83,8 @@ const AeroBilling = {
         } catch (err) {
             console.error("[AeroBilling] startCheckout:", err);
             AeroApp.showToast("Failed to start trial: " + (err.message || "unknown error"), "danger");
+        } finally {
+            this._operations.delete('checkout');
         }
     },
 
@@ -97,33 +93,44 @@ const AeroBilling = {
      * Customers can update payment methods, view invoices, cancel.
      */
     async openPortal() {
-        const session = await _sb.auth.getSession();
-        const token   = session.data?.session?.access_token;
-
-        if (!token) {
-            AeroApp.showToast("Please sign in first.", "warning");
+        if (this._operations.has('portal')) {
+            AeroApp.showToast('The billing portal is already opening.', 'info');
             return;
         }
+        this._operations.add('portal');
+        try {
+            const session = await _sb.auth.getSession();
+            const token   = session.data?.session?.access_token;
 
-        const resp = await fetch(PORTAL_FUNCTION_URL, {
-            method:  "POST",
-            headers: {
-                "Content-Type":  "application/json",
-                "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-                returnUrl: window.location.href,
-            }),
-        });
+            if (!token) {
+                AeroApp.showToast("Please sign in first.", "warning");
+                return;
+            }
 
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            AeroApp.showToast(err.error || "Failed to open billing portal.", "danger");
-            return;
+            const resp = await fetch(PORTAL_FUNCTION_URL, {
+                method:  "POST",
+                headers: {
+                    "Content-Type":  "application/json",
+                    "Authorization": `Bearer ${token}`,
+                },
+                body: JSON.stringify({ returnUrl: window.location.href }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                AeroApp.showToast(err.error || "Failed to open billing portal.", "danger");
+                return;
+            }
+
+            const { url } = await resp.json();
+            if (!url) throw new Error('Billing portal response did not include a URL');
+            window.location.href = url;
+        } catch (err) {
+            console.error('[AeroBilling] openPortal:', err);
+            AeroApp.showToast('Failed to open billing portal.', 'danger');
+        } finally {
+            this._operations.delete('portal');
         }
-
-        const { url } = await resp.json();
-        window.location.href = url;
     },
 
     /**

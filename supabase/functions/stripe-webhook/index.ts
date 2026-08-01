@@ -27,7 +27,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
 
 // ── Environment ──────────────────────────────────────────────
 const STRIPE_SECRET_KEY      = Deno.env.get("STRIPE_SECRET_KEY")!;
@@ -45,6 +45,9 @@ serve(async (req: Request) => {
     if (req.method !== "POST") {
         return new Response("Method not allowed", { status: 405 });
     }
+    if (!/^(sk|rk)_test_/.test(STRIPE_SECRET_KEY)) {
+        return new Response("Sandbox deployment requires a Stripe test key", { status: 503 });
+    }
 
     const signature = req.headers.get("stripe-signature");
     if (!signature) {
@@ -57,11 +60,27 @@ serve(async (req: Request) => {
     try {
         event = stripe.webhooks.constructEvent(body, signature, STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-        console.error("[webhook] Signature verification failed:", err.message);
-        return new Response(`Webhook error: ${err.message}`, { status: 400 });
+        console.error("[webhook] Signature verification failed:", (err as Error).message);
+        return new Response("Invalid webhook signature", { status: 400 });
     }
 
     console.log(`[webhook] Received: ${event.type}`);
+
+    try {
+        const shouldProcess = await claimEvent(event);
+        if (!shouldProcess) {
+            return new Response(JSON.stringify({ received: true, duplicate: true }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+    } catch (err) {
+        console.error(`[webhook] Could not claim ${event.id}:`, err);
+        return new Response(JSON.stringify({ error: "Could not claim webhook event" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
 
     try {
         switch (event.type) {
@@ -102,12 +121,16 @@ serve(async (req: Request) => {
             default:
                 console.log(`[webhook] Unhandled event type: ${event.type}`);
         }
+        await markEventProcessed(event.id);
     } catch (err) {
         console.error(`[webhook] Error handling ${event.type}:`, err);
-        // Return 200 so Stripe doesn't retry endlessly for logic errors.
-        // Change to 500 only if you want Stripe to retry.
-        return new Response(JSON.stringify({ error: err.message }), {
-            status: 200,
+        await markEventFailed(event.id, (err as Error).message).catch((markErr) => {
+            console.error(`[webhook] Could not mark ${event.id} failed:`, markErr);
+        });
+        // Retry transient processing failures. Returning 200 here can silently
+        // lose billing or transfer state.
+        return new Response(JSON.stringify({ error: "Webhook processing failed" }), {
+            status: 500,
             headers: { "Content-Type": "application/json" },
         });
     }
@@ -125,6 +148,64 @@ serve(async (req: Request) => {
  * Resolves company_id from stripe_customer_id stored in the subscriptions table
  * or from the customer's metadata (set during Checkout).
  */
+async function claimEvent(event: Stripe.Event): Promise<boolean> {
+    const object = event.data.object as { id?: unknown };
+    const objectId = typeof object?.id === "string" ? object.id : null;
+    const now = new Date().toISOString();
+    const { error: insertError } = await supabase.from("stripe_webhook_events").insert({
+        event_id: event.id,
+        event_type: event.type,
+        object_id: objectId,
+        status: "processing",
+        updated_at: now,
+    });
+    if (!insertError) return true;
+    if (insertError.code !== "23505") throw insertError;
+
+    const { data: existing, error: fetchError } = await supabase
+        .from("stripe_webhook_events")
+        .select("status, attempts, updated_at")
+        .eq("event_id", event.id)
+        .single();
+    if (fetchError || !existing) throw fetchError ?? new Error("Webhook event claim missing");
+    if (existing.status === "processed") return false;
+
+    const isStale = new Date(existing.updated_at).getTime() < Date.now() - 5 * 60 * 1000;
+    if (existing.status === "processing" && !isStale) return false;
+
+    const { error: retryError } = await supabase
+        .from("stripe_webhook_events")
+        .update({
+            status: "processing",
+            attempts: Number(existing.attempts || 1) + 1,
+            last_error: null,
+            updated_at: now,
+        })
+        .eq("event_id", event.id);
+    if (retryError) throw retryError;
+    return true;
+}
+
+async function markEventProcessed(eventId: string) {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("stripe_webhook_events").update({
+        status: "processed",
+        processed_at: now,
+        last_error: null,
+        updated_at: now,
+    }).eq("event_id", eventId);
+    if (error) throw error;
+}
+
+async function markEventFailed(eventId: string, message: string) {
+    const { error } = await supabase.from("stripe_webhook_events").update({
+        status: "failed",
+        last_error: message.slice(0, 2000),
+        updated_at: new Date().toISOString(),
+    }).eq("event_id", eventId);
+    if (error) throw error;
+}
+
 async function handleSubscriptionUpsert(sub: Stripe.Subscription) {
     const customerId = sub.customer as string;
     const companyId  = await resolveCompanyId(customerId, sub);
@@ -342,7 +423,10 @@ async function handleAccountUpdated(account: Stripe.Account) {
                             intra_stripe_flows:  { requested: true },
                         },
                     },
-                    { stripeAccount: account.id },
+                    {
+                        stripeAccount: account.id,
+                        idempotencyKey: `financial-account:${companyId}`,
+                    },
                 );
 
                 await supabase.from("companies")
@@ -359,7 +443,7 @@ async function handleAccountUpdated(account: Stripe.Account) {
 
                 console.log(`[webhook] Financial account ${fa.id} created for company ${companyId}`);
             } catch (err) {
-                console.error(`[webhook] Failed to create financial account for ${companyId}:`, err.message);
+                console.error(`[webhook] Failed to create financial account for ${companyId}:`, (err as Error).message);
             }
         }
     }

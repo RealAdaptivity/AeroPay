@@ -4,3 +4,5 @@
 .env.*
 !.env.example
 supabase/.temp/
+node_modules/
+coverage/

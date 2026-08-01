@@ -12,21 +12,35 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.106.2";
+import { enforceUserRateLimit, errorResponse, readJsonObject, RequestError } from "../_shared/security.ts";
 
-const stripe    = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { apiVersion: "2024-06-20" });
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+const stripe    = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const supabase  = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+const PRICE_BASE_ID = Deno.env.get("STRIPE_PRICE_BASE_ID") ?? "price_1TzIdaAsgAzfeB6DKeordaY7";
+const PRICE_SEAT_ID = Deno.env.get("STRIPE_PRICE_SEAT_ID") ?? "price_1TzIdbAsgAzfeB6D0GyWkgXK";
+const PLATFORM_URL = "http://localhost:5500";
+const TRIAL_DAYS = Number(Deno.env.get("STRIPE_TRIAL_DAYS") ?? "14");
+const CORS_ORIGIN = "http://localhost:5500";
+
 const CORS = {
-    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Origin":  CORS_ORIGIN,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
 };
 
 serve(async (req: Request) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    if (!/^(sk|rk)_test_/.test(STRIPE_SECRET_KEY)) {
+        return json({ error: "Sandbox deployment requires a Stripe test key" }, 503);
+    }
 
     // Authenticate caller via Supabase JWT
     const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
@@ -35,7 +49,13 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
     if (authErr || !user) return json({ error: "Unauthorized" }, 401);
 
-    const body = await req.json();
+    let body: any;
+    try {
+        body = await readJsonObject(req, 16_384);
+        const requestedAction = String(body.action || "checkout");
+        if (!["checkout","update_seats","sync_subscription"].includes(requestedAction)) throw new RequestError("Unknown action", 400);
+        await enforceUserRateLimit(supabase, user.id, `stripe-checkout:${requestedAction}`, 10);
+    } catch (err) { return errorResponse(err, CORS, "stripe-checkout"); }
     const { action = "checkout" } = body;
 
     try {
@@ -47,21 +67,42 @@ serve(async (req: Request) => {
         }
         return await handleCheckout(user.id, body);
     } catch (err) {
-        console.error("[stripe-checkout]", err);
-        return json({ error: err.message }, 500);
+        return errorResponse(err, CORS, `stripe-checkout:${String(action)}`);
     }
 });
 
 // ── Create Checkout Session ────────────────────────────────────
-async function handleCheckout(userId: string, body: any) {
-    const { companyId, companyName, employeeCount, priceBaseId, priceSeatId, successUrl, cancelUrl } = body;
-
-    if (!priceBaseId || String(priceBaseId).includes("REPLACE")
-        || !priceSeatId || String(priceSeatId).includes("REPLACE")) {
+async function handleCheckout(userId: string, _body: unknown) {
+    if (!PRICE_BASE_ID || PRICE_BASE_ID.includes("REPLACE")
+        || !PRICE_SEAT_ID || PRICE_SEAT_ID.includes("REPLACE")) {
         return json({
-            error: "Invalid Stripe price IDs (placeholders). Use sandbox prices or fill LIVE in config.js.",
-        }, 400);
+            error: "Stripe billing is not configured on the server.",
+        }, 503);
     }
+
+    // Never trust tenant, price, quantity, or redirect values supplied by the browser.
+    const { data: companyUser, error: membershipError } = await supabase
+        .from("company_users")
+        .select("company_id, role, created_at")
+        .eq("user_id", userId)
+        .in("role", ["owner", "admin"])
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (membershipError || !companyUser) return json({ error: "Company not found" }, 404);
+
+    const companyId = companyUser.company_id as string;
+    const { data: company, error: companyError } = await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", companyId)
+        .single();
+    if (companyError || !company) return json({ error: "Company not found" }, 404);
+
+    const { count: employeeCount, error: countError } = await supabase
+        .from("employees")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("is_active", true);
+    if (countError) throw new Error(countError.message);
 
     // Look up or create Stripe customer for this company
     let stripeCustomerId: string | undefined;
@@ -75,17 +116,28 @@ async function handleCheckout(userId: string, body: any) {
     if (existingSub?.stripe_customer_id) {
         stripeCustomerId = existingSub.stripe_customer_id;
     } else {
+        const existingCustomers = await stripe.customers.search({
+            query: `metadata["company_id"]:"${companyId}"`,
+            limit: 1,
+        });
+        stripeCustomerId = existingCustomers.data[0]?.id;
+    }
+
+    if (!stripeCustomerId) {
         // Get user email from auth
         const { data: { user } } = await supabase.auth.admin.getUserById(userId);
-        const customer = await stripe.customers.create({
-            email:    user?.email,
-            name:     companyName,
-            metadata: { company_id: companyId, user_id: userId },
-        });
+        const customer = await stripe.customers.create(
+            {
+                email:    user?.email,
+                name:     company.name,
+                metadata: { company_id: companyId, user_id: userId },
+            },
+            { idempotencyKey: `checkout-customer:${companyId}` },
+        );
         stripeCustomerId = customer.id;
     }
 
-    const trialDays = Number(body.trialDays ?? 14);
+    const trialDays = TRIAL_DAYS;
     const subscriptionData: Record<string, unknown> = {
         metadata: { company_id: companyId },
     };
@@ -93,41 +145,45 @@ async function handleCheckout(userId: string, body: any) {
         subscriptionData.trial_period_days = Math.floor(trialDays);
     }
 
-    const session = await stripe.checkout.sessions.create({
-        customer:   stripeCustomerId,
-        mode:       "subscription",
-        line_items: [
-            {
-                price:    priceBaseId,
-                quantity: 1,
-            },
-            {
-                price:    priceSeatId,
-                quantity: Math.max(1, employeeCount),
-            },
-        ],
-        subscription_data: subscriptionData,
-        allow_promotion_codes: true,
-        billing_address_collection: "required",
-        success_url: successUrl,
-        cancel_url:  cancelUrl,
-    });
+    const seats = Math.max(1, employeeCount ?? 0);
+    const session = await stripe.checkout.sessions.create(
+        {
+            customer:   stripeCustomerId,
+            mode:       "subscription",
+            line_items: [
+                { price: PRICE_BASE_ID, quantity: 1 },
+                { price: PRICE_SEAT_ID, quantity: seats },
+            ],
+            subscription_data: subscriptionData,
+            allow_promotion_codes: true,
+            billing_address_collection: "required",
+            success_url: `${PLATFORM_URL}/?checkout=success`,
+            cancel_url:  `${PLATFORM_URL}/?checkout=canceled`,
+        },
+        { idempotencyKey: `checkout-session:${companyId}:seats:${seats}` },
+    );
 
     return json({ url: session.url });
 }
 
 // ── Update Seat Count on Existing Subscription ─────────────────
-async function handleUpdateSeats(userId: string, body: any) {
-    const { employeeCount } = body;
-
+async function handleUpdateSeats(userId: string, _body: unknown) {
     // Find the company for this user
     const { data: companyUser } = await supabase
         .from("company_users")
-        .select("company_id")
+        .select("company_id, role, created_at")
         .eq("user_id", userId)
-        .single();
+        .in("role", ["owner", "admin"])
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
     if (!companyUser) return json({ error: "Company not found" }, 404);
+
+    const { count: employeeCount, error: countError } = await supabase
+        .from("employees")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyUser.company_id)
+        .eq("is_active", true);
+    if (countError) throw new Error(countError.message);
 
     const { data: sub } = await supabase
         .from("subscriptions")
@@ -144,15 +200,20 @@ async function handleUpdateSeats(userId: string, body: any) {
     // Find the per-seat item on the subscription
     const stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
     const seatItem  = stripeSub.items.data.find(
-        (item) => item.price?.metadata?.type === "per_seat"
+        (item: Stripe.SubscriptionItem) => item.price?.metadata?.type === "per_seat"
     );
 
     if (!seatItem) return json({ updated: false });
 
-    await stripe.subscriptions.update(sub.stripe_subscription_id, {
-        items: [{ id: seatItem.id, quantity: Math.max(1, employeeCount) }],
-        proration_behavior: "create_prorations",
-    });
+    const seats = Math.max(1, employeeCount ?? 0);
+    await stripe.subscriptions.update(
+        sub.stripe_subscription_id,
+        {
+            items: [{ id: seatItem.id, quantity: seats }],
+            proration_behavior: "create_prorations",
+        },
+        { idempotencyKey: `update-seats:${sub.stripe_subscription_id}:${seats}` },
+    );
 
     return json({ updated: true });
 }
@@ -164,9 +225,10 @@ async function handleUpdateSeats(userId: string, body: any) {
 async function handleSyncSubscription(userId: string) {
     const { data: companyUser } = await supabase
         .from("company_users")
-        .select("company_id")
+        .select("company_id, role, created_at")
         .eq("user_id", userId)
-        .single();
+        .in("role", ["owner", "admin"])
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
     if (!companyUser) return json({ error: "Company not found" }, 404);
     const companyId = companyUser.company_id;
@@ -197,7 +259,7 @@ async function handleSyncSubscription(userId: string) {
             status:   "all",
             limit:    5,
         });
-        stripeSub = list.data.find((s) => ["trialing", "active", "past_due"].includes(s.status))
+        stripeSub = list.data.find((s: Stripe.Subscription) => ["trialing", "active", "past_due"].includes(s.status))
             ?? list.data[0]
             ?? null;
     }

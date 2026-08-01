@@ -1,25 +1,47 @@
 /**
  * GlidePay — Environment Configuration
  *
- * Auto-detects sandbox vs. live based on hostname.
- * localhost / 127.0.0.1 / *.local / *.vercel.app preview URLs → sandbox.
- * Everything else (glidepay.org) → live — unless live keys/prices are still
- * placeholders, in which case we fall back to sandbox so Checkout works.
+ * Selects sandbox or live configuration from a strict hostname allowlist.
+ * localhost / 127.0.0.1 / *.local URLs → sandbox.
+ * Everything else (including previews) → live. If live keys/prices are still
+ * placeholders, Checkout is disabled rather than falling back to sandbox.
  *
- * To force sandbox on any host: add ?sandbox=1 to the URL, or set
- *   localStorage.setItem('aeropay_env', 'sandbox')
- * To force live (only after LIVE keys/prices are filled):
- *   localStorage.setItem('aeropay_env', 'live')
- * Placeholder LIVE prices always fall back to SANDBOX (forced live is cleared).
+ * Browser URL parameters and local storage cannot override the environment.
  */
 
-const AeroConfig = (() => {
+function resolveAeroEnvironment(hostname) {
     const SANDBOX_HOSTS = ["localhost", "127.0.0.1"];
-    const isSandboxHost = SANDBOX_HOSTS.includes(location.hostname)
-        || location.hostname.endsWith(".local")
-        || location.hostname.endsWith(".vercel.app")
-        || location.hostname.endsWith(".github.io")
-        || new URLSearchParams(location.search).get("sandbox") === "1";
+    return SANDBOX_HOSTS.includes(hostname) || hostname.endsWith(".local")
+        ? "sandbox"
+        : "live";
+}
+
+function isAeroBillingConfigured(cfg) {
+    return !!cfg.stripePublishableKey
+        && !cfg.stripePublishableKey.includes("REPLACE")
+        && !!cfg.priceBaseId
+        && !cfg.priceBaseId.includes("REPLACE")
+        && !!cfg.priceSeatId
+        && !cfg.priceSeatId.includes("REPLACE");
+}
+
+// Use for every untrusted value interpolated into generated markup. Attribute
+// escaping is intentionally the same strict encoding because templates use
+// quoted attributes throughout the application.
+function escapeHTML(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function escapeAttr(value) {
+    return escapeHTML(value).replace(/`/g, "&#96;");
+}
+
+const AeroConfig = typeof location !== "undefined" ? (() => {
 
     // ── Sandbox (test-mode) config ────────────────────────────────────────────
     // GlidePay Test sandbox — acct_1TkoXCAsgAzfeB6D
@@ -56,30 +78,7 @@ const AeroConfig = (() => {
         inviteEmployeeFunctionUrl: "https://ojvnxnlrghatkwjrlnop.supabase.co/functions/v1/invite-employee",
     };
 
-    const isPlaceholder = (cfg) =>
-        !cfg.stripePublishableKey
-        || cfg.stripePublishableKey.includes("REPLACE")
-        || !cfg.priceBaseId
-        || cfg.priceBaseId.includes("REPLACE")
-        || !cfg.priceSeatId
-        || cfg.priceSeatId.includes("REPLACE");
-
-    const override = localStorage.getItem("aeropay_env");
-    let env = override === "live"    ? "live"
-            : override === "sandbox" ? "sandbox"
-            : isSandboxHost          ? "sandbox"
-            : "live";
-
-    // Never send placeholder LIVE price IDs to Stripe — even if aeropay_env=live.
-    // Until real live keys/prices are filled in config.js, always use SANDBOX.
-    if (env === "live" && isPlaceholder(LIVE)) {
-        console.warn(
-            "[GlidePay] Live Stripe keys/prices are still placeholders — using SANDBOX. " +
-            "Fill LIVE in config.js for real charges. Clear localStorage aeropay_env if you forced live."
-        );
-        env = "sandbox";
-        try { localStorage.removeItem("aeropay_env"); } catch (_) { /* private mode */ }
-    }
+    const env = resolveAeroEnvironment(location.hostname);
 
     const cfg = env === "sandbox" ? SANDBOX : LIVE;
 
@@ -90,5 +89,14 @@ const AeroConfig = (() => {
         );
     }
 
-    return { env, ...cfg };
-})();
+    const billingConfigured = isAeroBillingConfigured(cfg);
+    if (!billingConfigured) {
+        console.error(`[GlidePay] ${env} billing is not configured; checkout is disabled.`);
+    }
+
+    return { env, billingConfigured, ...cfg };
+})() : null;
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = { resolveAeroEnvironment, isAeroBillingConfigured, escapeHTML, escapeAttr };
+}

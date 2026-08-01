@@ -1,7 +1,7 @@
 /**
  * GlidePay Payroll Engine
- * Handles exact federal, state, and FICA payroll calculations.
- * Reflects standard IRS Publication 15-T percentage method withholding tables and progressive state taxes.
+ * Sandbox payroll estimator. Production use requires independent tax-provider
+ * certification and annual table updates.
  */
 
 const PAY_FREQUENCIES = {
@@ -10,6 +10,9 @@ const PAY_FREQUENCIES = {
     semimonthly: 24,
     monthly: 12
 };
+
+const ZERO_SIT_STATES = ['TX', 'FL', 'NV', 'WA', 'TN', 'SD', 'WY', 'AK', 'NH'];
+const SUPPORTED_TAX_STATES = ['CA', 'NY', ...ZERO_SIT_STATES];
 
 // 2026 Federal Income Tax Brackets (Adjusted for inflation)
 const FED_BRACKETS = {
@@ -260,11 +263,10 @@ function calculatePayroll(employee, currentRun, ytdGross = 0) {
         const annualizedSitTaxable = Math.max(0, annualizedSitGross - nyConfig.standardDeduction);
         const annualizedSit = calculateProgressiveTax(annualizedSitTaxable, nyConfig);
         sitWithholding = annualizedSit / periodsPerYear;
-    } else if (['TX', 'FL', 'NV', 'WA', 'TN', 'SD', 'WY', 'AK', 'NH'].includes(state)) {
+    } else if (ZERO_SIT_STATES.includes(state)) {
         sitWithholding = 0; // No state income tax
     } else {
-        // Default flat state tax rate (e.g., 4.5% flat)
-        sitWithholding = fitTaxableWages * 0.045;
+        throw new Error(`State tax calculation is not supported for ${state}. Do not run this payroll.`);
     }
     
     // 6. Post-Tax Deductions (does NOT reduce taxable income, e.g. Roth 401k, garnish)
@@ -387,5 +389,5 @@ function round(val) {
 
 // Export functions for browser environment
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { calculatePayroll, PAY_FREQUENCIES, FED_BRACKETS, CA_BRACKETS, NY_BRACKETS };
+    module.exports = { calculatePayroll, PAY_FREQUENCIES, FED_BRACKETS, CA_BRACKETS, NY_BRACKETS, SUPPORTED_TAX_STATES };
 }
