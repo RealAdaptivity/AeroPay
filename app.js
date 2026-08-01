@@ -3228,8 +3228,12 @@ const AeroApp = {
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body:    JSON.stringify({ action: 'setup_intent', employeeId }),
             });
-            if (!resp.ok) throw new Error('Failed to create setup intent');
-            const { client_secret } = await resp.json();
+            const setupPayload = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(setupPayload.error || 'Failed to create setup intent');
+            }
+            const { client_secret } = setupPayload;
+            if (!client_secret) throw new Error(setupPayload.error || 'Setup intent missing client_secret');
 
             // 2. Use Stripe.js to collect bank account via Financial Connections
             const stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
