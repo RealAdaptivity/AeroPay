@@ -73,6 +73,7 @@ function _toAppEmployee(row) {
         bankRouting:    row.bank_routing       || '',
         bankLast4:      row.bank_account_last4  || '',
         stripePmId:     row.stripe_pm_id        || '',
+        stripeCustomerId: row.stripe_customer_id || '',
         garnishments:   [],   // loaded separately via getGarnishments()
         isActive:       row.is_active,
         userId:         row.user_id,

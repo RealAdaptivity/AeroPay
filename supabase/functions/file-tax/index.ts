@@ -89,6 +89,7 @@ serve(async (req: Request) => {
             case "submit":     return await handleSubmit(user.id, body);
             case "get_status": return await handleGetStatus(user.id, body);
             case "list":       return await handleList(user.id);
+            case "probe":      return await handleProbe(user.id, body);
             default:           return json({ error: `Unknown action: ${action}` }, 400);
         }
     } catch (err) {
@@ -225,6 +226,113 @@ async function handleList(userId: string) {
     return json({ submissions: data ?? [], provider: providerName, configured: true });
 }
 
+/** Sandbox diagnostics — exercises TaxBandit auth + Business + Form941 Create/Transmit. */
+async function handleProbe(userId: string, body: { formType?: string; period?: string }) {
+    const company = await getCompanyForUser(userId);
+    const steps: Record<string, unknown> = {
+        apiBase: TB_API_BASE,
+        authUrl: TB_AUTH_URL,
+        company: { id: company.id, name: company.name, ein: company.ein },
+    };
+
+    try {
+        const token = await getTaxBanditAccessToken();
+        steps.auth = { ok: true, tokenPrefix: token.slice(0, 12) + "…" };
+    } catch (err) {
+        steps.auth = { ok: false, error: (err as Error).message };
+        return json({ steps }, 200);
+    }
+
+    try {
+        const createRaw = await tbFetch("Business/Create", {
+            method: "POST",
+            body: JSON.stringify(businessPayload(company)),
+        });
+        steps.businessCreate = {
+            ok: true,
+            businessId: createRaw.BusinessId,
+            statusMessage: createRaw.StatusMessage,
+            errors: createRaw.Errors,
+        };
+    } catch (err) {
+        steps.businessCreate = { ok: false, error: (err as Error).message };
+    }
+
+    try {
+        const list = await tbFetch(businessListQuery(), { method: "GET" });
+        steps.businessList = {
+            ok: true,
+            count: ((list.Businesses || list.Business || []) as any[]).length,
+            sample: ((list.Businesses || list.Business || []) as any[]).slice(0, 3),
+        };
+    } catch (err) {
+        steps.businessList = { ok: false, error: (err as Error).message };
+    }
+
+    try {
+        const bizId = await ensureTaxBanditBusiness(company);
+        steps.business = { ok: true, businessId: bizId };
+    } catch (err) {
+        steps.business = { ok: false, error: (err as Error).message };
+        // Continue — Form941 Create can embed full Business without BusinessId.
+    }
+
+    const formType = body.formType || "941";
+    const period = body.period || "2025-Q3";
+    const route = formRoute(formType);
+    if (!route) return json({ steps, error: "unsupported form" }, 400);
+
+    const { taxYr, qtr } = parsePeriod(period);
+    const createBody = buildCreatePayload(formType, String((steps.business as any).businessId), company, taxYr, qtr, {
+        amount: 1200,
+        formData: { wagesAmt: 20000, fedIncomeTaxWHAmt: 2400, employeeCnt: 1 },
+    });
+    steps.createRequestKeys = Object.keys(createBody);
+
+    try {
+        const created = await tbFetch(route.create, {
+            method: "POST",
+            body: JSON.stringify(createBody),
+        });
+        const formBucket = (created.Form941Records || created.Form940Records ||
+            created.FormW2Records || created.Form1099NECRecords) as any;
+        const successRecs = formBucket?.SuccessRecords || [];
+        const recordIds = successRecs.map((r: any) => r?.RecordId).filter(Boolean);
+        const submissionId = created.SubmissionId || successRecs[0]?.SubmissionId || null;
+        steps.create = {
+            ok: true,
+            statusCode: created.StatusCode,
+            statusMessage: created.StatusMessage,
+            submissionId,
+            recordIds,
+            errorRecords: formBucket?.ErrorRecords ?? created.Errors ?? null,
+        };
+
+        if (submissionId) {
+            try {
+                const transmitBody: Record<string, unknown> = { SubmissionId: submissionId };
+                if (recordIds.length) transmitBody.RecordIds = recordIds;
+                const tx = await tbFetch(route.transmit, {
+                    method: "POST",
+                    body: JSON.stringify(transmitBody),
+                });
+                steps.transmit = {
+                    ok: true,
+                    statusCode: tx.StatusCode,
+                    statusMessage: tx.StatusMessage,
+                    records: tx.Form941Records || tx.Form940Records || null,
+                };
+            } catch (err) {
+                steps.transmit = { ok: false, error: (err as Error).message };
+            }
+        }
+    } catch (err) {
+        steps.create = { ok: false, error: (err as Error).message };
+    }
+
+    return json({ steps }, 200);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TaxBandit
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -293,47 +401,83 @@ async function tbFetch(path: string, init: RequestInit = {}): Promise<Record<str
             ...(init.headers || {}),
         },
     });
-    const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
+    const text = await resp.text();
+    let data: Record<string, unknown> = {};
+    try { data = text ? JSON.parse(text) : {}; } catch {
+        data = { StatusMessage: text.slice(0, 300) };
+    }
     if (!resp.ok) {
-        const msg = extractTbError(data) || `TaxBandit ${path} failed (${resp.status})`;
-        throw new Error(msg);
+        const msg = extractTbError(data) || `TaxBandit ${path} failed (HTTP ${resp.status})`;
+        throw new Error(`${msg} [${path}]`);
     }
     // TaxBandit often returns 200 with StatusCode != 1 for validation errors
     const code = data.StatusCode ?? data.Status ?? data.statusCode;
     if (code != null && Number(code) !== 1 && Number(code) !== 200) {
-        throw new Error(extractTbError(data) || `TaxBandit StatusCode ${code}`);
+        throw new Error(
+            (extractTbError(data) || `TaxBandit StatusCode ${code}`) + ` [${path}]`,
+        );
     }
     return data;
 }
 
+function formatErrorList(errors: unknown): string | null {
+    if (!Array.isArray(errors) || !errors.length) return null;
+    return errors.map((e: any) => {
+        const id = e.Id || e.id || "";
+        const name = e.Name || e.name || "";
+        const msg = e.Message || e.message || JSON.stringify(e);
+        return [id, name, msg].filter(Boolean).join(": ");
+    }).join("; ");
+}
+
 function extractTbError(data: Record<string, unknown>): string | null {
+    // Prefer structured Errors over generic StatusMessage ("Validation error has occurred").
+    const topErrors = formatErrorList(data.Errors || data.errors || data.ErrorRecords);
+    if (topErrors) return topErrors;
+
+    const formRecords = (data.Form941Records || data.Form940Records || data.FormW2Records ||
+        data.Form1099NECRecords) as Record<string, unknown> | undefined;
+    const nestedErrors = formRecords?.ErrorRecords;
+    if (Array.isArray(nestedErrors) && nestedErrors.length) {
+        return nestedErrors.map((rec: any) => {
+            return formatErrorList(rec.Errors) || rec.Message || JSON.stringify(rec);
+        }).join(" | ");
+    }
+
     if (typeof data.StatusMessage === "string" && data.StatusMessage) return data.StatusMessage;
     if (typeof data.message === "string" && data.message) return data.message;
     if (typeof data.ErrorMessage === "string" && data.ErrorMessage) return data.ErrorMessage;
-    const errors = data.Errors || data.errors || data.ErrorRecords;
-    if (Array.isArray(errors) && errors.length) {
-        return errors.map((e: any) => e.Message || e.message || JSON.stringify(e)).join("; ");
-    }
     return null;
 }
 
+function digitsOnly(value: unknown, fallback = ""): string {
+    return String(value ?? "").replace(/\D/g, "") || fallback;
+}
+
+function formatEin(company: Record<string, any>): string {
+    const ein = digitsOnly(company.ein, "000000000").slice(0, 9);
+    return ein.length === 9 ? `${ein.slice(0, 2)}-${ein.slice(2)}` : ein;
+}
+
 function businessPayload(company: Record<string, any>) {
-    const ein = String(company.ein || "").replace(/\D/g, "") || "000000000";
+    const phone = digitsOnly(company.phone, "3025550100").slice(0, 10);
     return {
         BusinessNm:         company.name || "GlidePay Company",
-        PayerRef:           company.id,
+        PayerRef:           String(company.id).slice(0, 50),
+        IsDefaultBusiness:  true,
         IsEIN:              true,
-        EINorSSN:           ein.length === 9 ? `${ein.slice(0, 2)}-${ein.slice(2)}` : ein,
+        EINorSSN:           formatEin(company),
         Email:              company.ownerEmail || "owner@glidepay.org",
-        ContactNm:          company.name || "Owner",
-        Phone:              "0000000000",
+        ContactNm:          String(company.name || "Owner").slice(0, 27),
+        Phone:              phone,
         IsForeign:          false,
         IsBusinessTerminated: false,
         BusinessType:       "ESTE",
+        KindOfEmployer:     "NONEAPPLY",
         KindOfPayer:        "REGULAR941",
         SigningAuthority: {
             Name:               "Authorized Signer",
-            Phone:              "0000000000",
+            Phone:              phone,
             BusinessMemberType: "ADMINISTRATOR",
         },
         USAddress: {
@@ -345,8 +489,37 @@ function businessPayload(company: Record<string, any>) {
     };
 }
 
+function businessListQuery(): string {
+    // TaxBandit requires FromDate/ToDate (MM/DD/YYYY) on Business/List.
+    // Keep slashes unencoded — their samples use FromDate=08/01/2024.
+    const to = new Date();
+    const from = new Date(to.getFullYear() - 2, to.getMonth(), to.getDate());
+    const fmt = (d: Date) =>
+        `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+    // Wide window — sandbox businesses may predate the company row.
+    return `Business/List?Page=1&PageSize=100&FromDate=01/01/2020&ToDate=${fmt(to)}`;
+}
+
 async function ensureTaxBanditBusiness(company: Record<string, any>): Promise<string> {
-    // Prefer creating with PayerRef; TaxBandit merges duplicate EINs.
+    const payerRef = String(company.id).slice(0, 50);
+    const ein = formatEin(company);
+
+    // Resolve existing business first (Create returns Duplicate EIN once it exists).
+    for (const path of [
+        `Business/Get?TIN=${ein}`,
+        `Business/Get?PayerRef=${payerRef}`,
+        `Business/Get?TIN=${digitsOnly(company.ein)}`,
+    ]) {
+        try {
+            const got = await tbFetch(path, { method: "GET" });
+            const nested = (got as any).Business || {};
+            const id = (got.BusinessId || nested.BusinessId) as string | undefined;
+            if (id) return String(id);
+        } catch {
+            // try next lookup
+        }
+    }
+
     try {
         const created = await tbFetch("Business/Create", {
             method: "POST",
@@ -355,20 +528,25 @@ async function ensureTaxBanditBusiness(company: Record<string, any>): Promise<st
         const id = (created.BusinessId || (created as any).businessId) as string | undefined;
         if (id) return String(id);
     } catch (err) {
-        // Fall through to list lookup (business may already exist)
         console.warn("[file-tax] Business/Create:", (err as Error).message);
     }
 
-    const list = await tbFetch("Business/List?Page=1&PageSize=100", { method: "GET" });
-    const rows = (list.Businesses || list.businesses || list.BusinessList || []) as any[];
-    const einDigits = String(company.ein || "").replace(/\D/g, "");
-    const match = rows.find((b) =>
-        String(b.PayerRef || "") === company.id ||
-        String(b.EINorSSN || "").replace(/\D/g, "") === einDigits ||
-        String(b.BusinessNm || "") === company.name,
-    );
-    if (match?.BusinessId) return String(match.BusinessId);
-    throw new Error("Could not create or find TaxBandit business for this company");
+    try {
+        const list = await tbFetch(businessListQuery(), { method: "GET" });
+        const rows = (list.Businesses || list.Business || list.businesses || list.BusinessList || []) as any[];
+        const einDigits = digitsOnly(company.ein);
+        const match = rows.find((b) =>
+            String(b.PayerRef || "") === company.id ||
+            String(b.EINorSSN || "").replace(/\D/g, "") === einDigits ||
+            String(b.BusinessNm || "") === company.name,
+        );
+        if (match?.BusinessId) return String(match.BusinessId);
+    } catch (err) {
+        console.warn("[file-tax] Business/List:", (err as Error).message);
+    }
+
+    // Form941 Create accepts a full Business object without BusinessId.
+    return "";
 }
 
 function parsePeriod(period: string | undefined): { taxYr: string; qtr: string } {
@@ -420,10 +598,20 @@ async function submitTaxBandit(
         body:   JSON.stringify(createBody),
     });
 
+    const formBucket = (created.Form941Records || created.Form940Records ||
+        created.FormW2Records || created.Form1099NECRecords) as any;
+    const successRecs = (formBucket?.SuccessRecords || []) as any[];
+    const successRec = successRecs[0];
+    const recordIds = successRecs
+        .map((r) => r?.RecordId)
+        .filter(Boolean)
+        .map(String);
+
     const submissionId = String(
         created.SubmissionId ||
         created.submissionId ||
         (created as any).SubmissionManifest?.SubmissionId ||
+        successRec?.SubmissionId ||
         "",
     ) || null;
 
@@ -435,11 +623,14 @@ async function submitTaxBandit(
         };
     }
 
-    // Transmit to IRS/SSA simulation in sandbox
+    // Transmit to IRS/SSA simulation in sandbox (requires RecordIds per TaxBandit docs)
     try {
+        const transmitBody: Record<string, unknown> = { SubmissionId: submissionId };
+        if (recordIds.length) transmitBody.RecordIds = recordIds;
+
         await tbFetch(route.transmit, {
             method: "POST",
-            body:   JSON.stringify({ SubmissionId: submissionId }),
+            body:   JSON.stringify(transmitBody),
         });
         return {
             submissionId,
@@ -447,7 +638,7 @@ async function submitTaxBandit(
             detail: `Created & transmitted via TaxBandit (${taxYr} ${qtr})`,
         };
     } catch (err) {
-        // Create succeeded; transmit may need more data — keep submission for retry/status
+        // Create succeeded; transmit may need signature / more data — keep for retry/status
         return {
             submissionId,
             status: "submitted",
@@ -476,13 +667,49 @@ function buildCreatePayload(
         const ssTax = Math.round(ssWages * 0.124 * 100) / 100;
         const medTax = Math.round(medWages * 0.029 * 100) / 100;
         const totalTax = Math.round((fit + ssTax + medTax) * 100) / 100;
+        const biz = businessPayload(company);
+        // IRS: under $2,500 → MINTAXLIABILITY; otherwise MONTHLY (split across 3 months).
+        const isMinLiability = totalTax < 2500;
+        const monthShare = Math.round((totalTax / 3) * 100) / 100;
+        const month3 = Math.round((totalTax - monthShare * 2) * 100) / 100;
+        const depositSchedule = isMinLiability
+            ? {
+                DepositorType: "MINTAXLIABILITY",
+                TotalQuarterTaxLiabilityAmt: totalTax,
+            }
+            : {
+                DepositorType: "MONTHLY",
+                MonthlyDepositor: {
+                    TaxLiabilityMonth1: monthShare,
+                    TaxLiabilityMonth2: monthShare,
+                    TaxLiabilityMonth3: month3,
+                },
+                TotalQuarterTaxLiabilityAmt: totalTax,
+            };
         return {
             Form941Records: [{
-                Sequence: "Record1",
+                SequenceId: "001",
                 ReturnHeader: {
+                    ReturnType: "FORM941",
                     TaxYr: taxYr,
                     Qtr:   qtr,
-                    Business: { BusinessId: businessId },
+                    Business: {
+                        ...(businessId ? { BusinessId: businessId } : {}),
+                        BusinessNm: biz.BusinessNm,
+                        PayerRef:   biz.PayerRef,
+                        IsEIN:      true,
+                        EINorSSN:   biz.EINorSSN,
+                        Email:      biz.Email,
+                        ContactNm:  biz.ContactNm,
+                        Phone:      biz.Phone,
+                        BusinessType: biz.BusinessType,
+                        SigningAuthority: biz.SigningAuthority,
+                        KindOfEmployer: biz.KindOfEmployer,
+                        KindOfPayer: biz.KindOfPayer,
+                        IsBusinessTerminated: false,
+                        IsForeign: false,
+                        USAddress: biz.USAddress,
+                    },
                     BusinessStatusDetails: {
                         IsBusinessClosed: false,
                         IsBusinessTransferred: false,
@@ -490,8 +717,9 @@ function buildCreatePayload(
                     },
                     IsThirdPartyDesignee: false,
                     SignatureDetails: {
+                        // 10-digit IRS Online Signature PIN — enables Transmit without Form 8453 EMP PDF upload.
                         SignatureType: "ONLINE_SIGN_PIN",
-                        OnlineSignaturePIN: { PIN: "123456" },
+                        OnlineSignaturePIN: { PIN: "1234567890" },
                     },
                 },
                 ReturnData: {
@@ -508,20 +736,22 @@ function buildCreatePayload(
                         TaxOnSocialSecurityTipsAmt_Col2: 0,
                         TaxOnMedicareWagesTipsAmt_Col2: medTax,
                         TaxOnWageTipsSubjAddnlMedcrAmt_Col2: 0,
-                        TotSSMdcrTaxAmt: ssTax + medTax,
+                        TotSSMdcrTaxAmt: Math.round((ssTax + medTax) * 100) / 100,
                         TaxOnUnreportedTips3121qAmt: 0,
                         TotalTaxBeforeAdjustmentAmt: totalTax,
+                        CurrentQtrFractionsCentsAmt: 0,
+                        CurrentQuarterSickPaymentAmt: 0,
+                        CurrQtrTipGrpTermLifeInsAdjAmt: 0,
                         TotalTaxAfterAdjustmentAmt: totalTax,
-                        TotTaxAmt: totalTax,
+                        PayrollTaxCreditAmt: 0,
+                        IsPayrollTaxCredit: false,
+                        TotTaxAfterAdjustmentAndNonRfdCr: totalTax,
                         TotTaxDepositAmt: totalTax,
                         BalanceDueAmt: 0,
                         OverpaidAmt: 0,
-                        IsPayrollTaxCredit: false,
                     },
-                    DepositScheduleType: {
-                        DepositorType: "MINTAXLIABILITY",
-                        TaxLiabilityTotalAmt: totalTax,
-                    },
+                    IRSPaymentType: "EFTPS",
+                    DepositScheduleType: depositSchedule,
                 },
             }],
         };
@@ -530,13 +760,13 @@ function buildCreatePayload(
     if (t.includes("940")) {
         return {
             Form940Records: [{
-                Sequence: "Record1",
+                SequenceId: "001",
                 ReturnHeader: {
                     TaxYr: taxYr,
                     Business: { BusinessId: businessId },
                     SignatureDetails: {
                         SignatureType: "ONLINE_SIGN_PIN",
-                        OnlineSignaturePIN: { PIN: "123456" },
+                        OnlineSignaturePIN: { PIN: "1234567890" },
                     },
                 },
                 ReturnData: {
