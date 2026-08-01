@@ -1276,6 +1276,18 @@ const AeroDB = {
     // W-2 SIGNATURES
     // ─────────────────────────────────────────
 
+    _mapW2Signature(data, employeeName) {
+        if (!data) return null;
+        return {
+            employeeId:    data.employee_id,
+            employeeName:  employeeName || '',
+            signatureData: data.signature_data,
+            timestamp:     new Date(data.signed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            ipAddress:     data.ip_address,
+            taxYear:       data.tax_year,
+        };
+    },
+
     /** Return the W-2 signature record for an employee, or null. */
     async getW2Signature(employeeId) {
         const year = new Date().getFullYear();
@@ -1285,32 +1297,62 @@ const AeroDB = {
             .eq('tax_year', year)
             .maybeSingle();
 
-        if (!data) return null;
-        return {
-            employeeId:    data.employee_id,
-            signatureData: data.signature_data,
-            timestamp:     new Date(data.signed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-            ipAddress:     data.ip_address,
-        };
+        return this._mapW2Signature(data);
+    },
+
+    /** Load all W-2 signatures visible to the current user (company or self). */
+    async getW2Signatures() {
+        const year = new Date().getFullYear();
+        const rows = _check(
+            await _sb.from('w2_signatures').select('*').eq('tax_year', year),
+            'getW2Signatures'
+        );
+        const map = {};
+        for (const row of rows || []) {
+            map[row.employee_id] = this._mapW2Signature(row);
+        }
+        return map;
     },
 
     /** Save a W-2 digital signature. */
     async saveW2Signature(employeeId, signatureDataURL, ipAddress, userAgent) {
         const company = await this.getCompany();
         const year    = new Date().getFullYear();
-        _check(
-            await _sb.from('w2_signatures').upsert({
-                company_id:     company.id,
-                employee_id:    employeeId,
-                tax_year:       year,
-                signature_data: signatureDataURL,
-                ip_address:     ipAddress,
-                user_agent:     userAgent,
-                signed_at:      new Date().toISOString(),
-            }, { onConflict: 'employee_id,tax_year' }),
-            'saveW2Signature'
-        );
-        await this.addAuditLog('W-2 Signed', `Employee ${employeeId} signed W-2 for ${year}`, 'employee');
+        const payload = {
+            company_id:     company.id,
+            employee_id:    employeeId,
+            tax_year:       year,
+            signature_data: signatureDataURL,
+            ip_address:     ipAddress,
+            user_agent:     userAgent,
+            signed_at:      new Date().toISOString(),
+        };
+
+        // Prefer update-then-insert so re-signs work even when upsert RLS is picky.
+        const existing = await _sb.from('w2_signatures')
+            .select('id')
+            .eq('employee_id', employeeId)
+            .eq('tax_year', year)
+            .maybeSingle();
+
+        if (existing.data?.id) {
+            _check(
+                await _sb.from('w2_signatures').update(payload).eq('id', existing.data.id),
+                'saveW2Signature'
+            );
+        } else {
+            _check(
+                await _sb.from('w2_signatures').upsert(payload, { onConflict: 'employee_id,tax_year' }),
+                'saveW2Signature'
+            );
+        }
+
+        // Audit log is admin-oriented; never block the employee signature on it.
+        try {
+            await this.addAuditLog('W-2 Signed', `Employee ${employeeId} signed W-2 for ${year}`, 'employee');
+        } catch (err) {
+            console.warn('[AeroDB] W-2 audit log skipped:', err.message || err);
+        }
     },
 
     // ─────────────────────────────────────────
@@ -1357,6 +1399,7 @@ const AeroDB = {
             payAdvances,
             filingRecords,
             taxFilings,
+            w2Signatures,
         ] = await Promise.all([
             soft(() => this.getEmployees(), []),
             soft(() => this.getPayrollHistory(), []),
@@ -1372,10 +1415,17 @@ const AeroDB = {
             soft(() => this.getPayAdvances(), []),
             isEmployeePortal ? Promise.resolve({}) : soft(() => this.getFilingRecords(), {}),
             isEmployeePortal ? Promise.resolve([]) : soft(() => this.getTaxFilings(), []),
+            soft(() => this.getW2Signatures(), {}),
         ]);
 
         const userIdToLabel = {};
         if (user?.id) userIdToLabel[user.id] = user.email || 'Admin';
+
+        // Attach employee display names onto signature records for the Documents UI.
+        const empNameById = Object.fromEntries((employees || []).map((e) => [e.id, e.name]));
+        for (const [empId, sig] of Object.entries(w2Signatures || {})) {
+            if (sig && !sig.employeeName) sig.employeeName = empNameById[empId] || '';
+        }
 
         return {
             settings: {
@@ -1417,7 +1467,7 @@ const AeroDB = {
             filingRecords,
             taxFilings,
             garnishments:    [],
-            w2Signatures:    {},
+            w2Signatures:    w2Signatures || {},
             burnRateBudget:  { monthly: 45000 },
             splitDeposits:   {},
         };
