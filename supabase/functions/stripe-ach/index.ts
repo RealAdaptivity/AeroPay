@@ -62,7 +62,9 @@ serve(async (req: Request) => {
 
 // ── Setup Intent ───────────────────────────────────────────────────────────────
 async function handleSetupIntent(userId: string, body: { employeeId: string }) {
-    const company = await getCompany(userId);
+    if (!body.employeeId) return json({ error: "employeeId is required" }, 400);
+
+    const company = await getCompany(userId, { employeeId: body.employeeId });
     const connectedAccountId = company.stripe_account_id as string | undefined;
 
     if (!connectedAccountId) {
@@ -71,11 +73,16 @@ async function handleSetupIntent(userId: string, body: { employeeId: string }) {
 
     const { data: emp, error: empErr } = await supabase
         .from("employees")
-        .select("id, name, email, stripe_customer_id, company_id")
+        .select("id, name, email, stripe_customer_id, company_id, user_id")
         .eq("id", body.employeeId)
         .eq("company_id", company.id)
         .single();
     if (empErr || !emp) return json({ error: "Employee not found" }, 404);
+
+    // Employees may only link their own bank account.
+    if (emp.user_id && emp.user_id !== userId && company._membershipRole === "employee") {
+        return json({ error: "Not allowed to link bank for another employee" }, 403);
+    }
 
     const customerId = await ensureEmployeeCustomer(emp, connectedAccountId);
 
@@ -105,7 +112,11 @@ async function handleConfirmSetup(userId: string, body: {
     employeeId:      string;
     paymentMethodId: string;
 }) {
-    const company = await getCompany(userId);
+    if (!body.employeeId || !body.paymentMethodId) {
+        return json({ error: "employeeId and paymentMethodId are required" }, 400);
+    }
+
+    const company = await getCompany(userId, { employeeId: body.employeeId });
     const connectedAccountId = company.stripe_account_id as string | undefined;
 
     if (!connectedAccountId) {
@@ -114,11 +125,15 @@ async function handleConfirmSetup(userId: string, body: {
 
     const { data: empBefore } = await supabase
         .from("employees")
-        .select("name, email, bank_account_last4, stripe_customer_id, company_id")
+        .select("name, email, bank_account_last4, stripe_customer_id, company_id, user_id")
         .eq("id", body.employeeId)
         .eq("company_id", company.id)
         .single();
     if (!empBefore) return json({ error: "Employee not found" }, 404);
+
+    if (empBefore.user_id && empBefore.user_id !== userId && company._membershipRole === "employee") {
+        return json({ error: "Not allowed to link bank for another employee" }, 403);
+    }
 
     const customerId = await ensureEmployeeCustomer(
         { ...empBefore, id: body.employeeId },
@@ -355,22 +370,78 @@ async function ensureEmployeeCustomer(
     return customer.id;
 }
 
-async function getCompany(userId: string) {
-    const [companyRes, userRes] = await Promise.all([
-        supabase
-            .from("company_users")
-            .select("company_id, companies(*)")
-            .eq("user_id", userId)
-            .single(),
-        supabase.auth.admin.getUserById(userId),
-    ]);
+/**
+ * Resolve the company for a user.
+ * Users can belong to multiple companies (e.g. old sandbox + current employer);
+ * `.single()` fails in that case — prefer the company tied to employeeId / portal link.
+ */
+async function getCompany(userId: string, opts: { employeeId?: string } = {}) {
+    const userRes = await supabase.auth.admin.getUserById(userId);
+    const adminEmail = userRes.data?.user?.email ?? null;
 
-    if (companyRes.error || !companyRes.data) throw new Error("Company not found for user");
+    let preferredCompanyId: string | null = null;
+
+    if (opts.employeeId) {
+        const { data: emp } = await supabase
+            .from("employees")
+            .select("company_id, user_id")
+            .eq("id", opts.employeeId)
+            .maybeSingle();
+        if (emp?.company_id) preferredCompanyId = emp.company_id as string;
+    }
+
+    if (!preferredCompanyId) {
+        const { data: selfEmp } = await supabase
+            .from("employees")
+            .select("company_id")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .maybeSingle();
+        if (selfEmp?.company_id) preferredCompanyId = selfEmp.company_id as string;
+    }
+
+    const { data: memberships, error } = await supabase
+        .from("company_users")
+        .select("company_id, role, companies(*)")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+    if (error) throw new Error(`Company lookup failed: ${error.message}`);
+
+    const rows = memberships || [];
+    let chosen = preferredCompanyId
+        ? rows.find((r) => r.company_id === preferredCompanyId)
+        : null;
+
+    // Fallbacks: Stripe-ready company, then newest membership.
+    if (!chosen) {
+        chosen = rows.find((r) => !!(r.companies as any)?.stripe_account_id) || rows[0] || null;
+    }
+
+    // Employee portal user with no company_users row — resolve via employees → companies.
+    if (!chosen && preferredCompanyId) {
+        const { data: company } = await supabase
+            .from("companies")
+            .select("*")
+            .eq("id", preferredCompanyId)
+            .single();
+        if (company) {
+            return {
+                id: company.id,
+                admin_email: adminEmail,
+                _membershipRole: "employee",
+                ...company,
+            };
+        }
+    }
+
+    if (!chosen?.companies) throw new Error("Company not found for user");
 
     return {
-        id:          companyRes.data.company_id,
-        admin_email: userRes.data?.user?.email ?? null,
-        ...(companyRes.data.companies as Record<string, unknown>),
+        id:          chosen.company_id,
+        admin_email: adminEmail,
+        _membershipRole: (chosen.role as string) || "member",
+        ...(chosen.companies as Record<string, unknown>),
     };
 }
 
